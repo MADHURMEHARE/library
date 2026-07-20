@@ -1,0 +1,6 @@
+{
+  "name": "Reading Room Management SaaS",
+  "description": "Multi-tenant SaaS for managing Reading Rooms, Study Libraries, and Silent Study Centers with seat allocation, attendance tracking, and revenue analytics.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
