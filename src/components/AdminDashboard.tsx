@@ -1838,83 +1838,100 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     <div className={`min-h-screen flex flex-col ${darkMode ? "dark bg-slate-950 text-slate-100" : "bg-slate-50 text-slate-800"}`}>
       
       {/* Top Header Section (No Print) */}
-      <header className="sticky top-0 z-40 bg-white border-b border-slate-200 dark:bg-slate-900 dark:border-slate-800 px-6 py-4 flex items-center justify-between shadow-xs no-print">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="md:hidden rounded-lg p-2 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/80 transition"
-            aria-label="Toggle navigation menu"
-          >
-            {mobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
-          </button>
-          {organization.logo ? (
-            <img
-              src={organization.logo}
-              alt={organization.name}
-              referrerPolicy="no-referrer"
-              className="h-9 w-9 rounded-lg object-cover"
-            />
-          ) : (
-            <div className="h-9 w-9 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-display font-bold text-lg">
-              {organization.name.substring(0, 1)}
-            </div>
-          )}
-          <div>
-            <h1 className="font-display text-base font-bold tracking-tight text-slate-900 dark:text-white">
-              {organization.name}
-            </h1>
-            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold tracking-wider uppercase block">
-              Reading Room Workspace
-            </span>
-          </div>
-        </div>
+     <header className="sticky top-0 z-40 bg-white border-b border-slate-200 dark:bg-slate-900 dark:border-slate-800 px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-3 shadow-sm no-print">
+  <div className="flex items-center gap-3 min-w-0">
+    <button
+      onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+      className="shrink-0 md:hidden rounded-lg p-2 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 transition"
+      aria-label="Toggle navigation menu"
+      aria-expanded={mobileMenuOpen}
+    >
+      {mobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+    </button>
 
-        {/* Header Action Buttons */}
-        <div className="flex items-center gap-3">
-          {/* Database Status Indicator */}
-          <div 
-            title={dbStatus.details}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[10px] font-mono font-bold uppercase tracking-wider ${
-              dbStatus.connected === "cloud"
-                ? "bg-emerald-50/80 border-emerald-200 text-emerald-700 dark:bg-emerald-950/20 dark:border-emerald-900/50 dark:text-emerald-400"
-                : dbStatus.connected === "error"
-                ? "bg-rose-50/80 border-rose-200 text-rose-700 dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400 cursor-help"
-                : "bg-slate-50 border-slate-200 text-slate-600 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400"
-            }`}
-          >
-            <span className={`h-1.5 w-1.5 rounded-full ${
-              dbStatus.connected === "cloud" 
-                ? "bg-emerald-500 animate-pulse" 
-                : dbStatus.connected === "error"
-                ? "bg-rose-500 animate-ping"
-                : "bg-slate-400"
-            }`} />
-            <span>{dbStatus.type === "JSON Local File" ? "LOCAL" : dbStatus.type} {dbStatus.connected === "error" ? "FAIL" : ""}</span>
-          </div>
+    {organization.logo ? (
+      <img
+        src={organization.logo}
+        alt={organization.name}
+        referrerPolicy="no-referrer"
+        className="h-9 w-9 shrink-0 rounded-lg object-cover ring-1 ring-slate-200 dark:ring-slate-800"
+      />
+    ) : (
+      <div className="h-9 w-9 shrink-0 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-display font-bold text-lg shadow-sm">
+        {organization.name.substring(0, 1)}
+      </div>
+    )}
 
-          <button
-            onClick={() => setDarkMode(!darkMode)}
-            className="rounded-lg p-2 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/80 transition"
-          >
-            {darkMode ? <Sun className="h-4 w-4 text-amber-500" /> : <Moon className="h-4 w-4" />}
-          </button>
+    <div className="min-w-0">
+      <h1 className="font-display text-sm sm:text-base font-bold tracking-tight text-slate-900 dark:text-white truncate">
+        {organization.name}
+      </h1>
+      <span className="hidden sm:block text-[10px] text-slate-400 dark:text-slate-500 font-semibold tracking-wider uppercase">
+        Reading Room Workspace
+      </span>
+    </div>
+  </div>
 
-          <div className="hidden md:flex flex-col items-end text-xs">
-            <span className="font-semibold text-slate-800 dark:text-slate-200">{currentUser.name}</span>
-            <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-mono font-semibold uppercase">
-              {currentUser.role.replace("_", " ")}
-            </span>
-          </div>
+  {/* Header Action Buttons */}
+  <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+    {/* Database Status Indicator */}
+    <div
+      title={dbStatus.details}
+      className={`hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[10px] font-mono font-bold uppercase tracking-wider ${
+        dbStatus.connected === "cloud"
+          ? "bg-emerald-50/80 border-emerald-200 text-emerald-700 dark:bg-emerald-950/20 dark:border-emerald-900/50 dark:text-emerald-400"
+          : dbStatus.connected === "error"
+          ? "bg-rose-50/80 border-rose-200 text-rose-700 dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400 cursor-help"
+          : "bg-slate-50 border-slate-200 text-slate-600 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400"
+      }`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${
+        dbStatus.connected === "cloud"
+          ? "bg-emerald-500 animate-pulse"
+          : dbStatus.connected === "error"
+          ? "bg-rose-500 animate-ping"
+          : "bg-slate-400"
+      }`} />
+      <span>{dbStatus.type === "JSON Local File" ? "LOCAL" : dbStatus.type} {dbStatus.connected === "error" ? "FAIL" : ""}</span>
+    </div>
 
-          <button
-            onClick={onLogout}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800 transition"
-          >
-            <LogOut className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Logout</span>
-          </button>
-        </div>
-      </header>
+    {/* Mobile-only status dot, no label */}
+    <div
+      title={dbStatus.details}
+      className={`sm:hidden h-2.5 w-2.5 rounded-full shrink-0 ${
+        dbStatus.connected === "cloud"
+          ? "bg-emerald-500 animate-pulse"
+          : dbStatus.connected === "error"
+          ? "bg-rose-500 animate-ping"
+          : "bg-slate-400"
+      }`}
+    />
+
+    <button
+      onClick={() => setDarkMode(!darkMode)}
+      className="rounded-lg p-2 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 transition"
+      aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+    >
+      {darkMode ? <Sun className="h-4 w-4 text-amber-500" /> : <Moon className="h-4 w-4" />}
+    </button>
+
+    <div className="hidden md:flex flex-col items-end text-xs max-w-[9rem]">
+      <span className="font-semibold text-slate-800 dark:text-slate-200 truncate w-full text-right">{currentUser.name}</span>
+      <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-mono font-semibold uppercase">
+        {currentUser.role.replace(/_/g, " ")}
+      </span>
+    </div>
+
+    <button
+      onClick={onLogout}
+      className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-rose-950/30 dark:hover:border-rose-900/60 dark:hover:text-rose-400 dark:focus-visible:ring-offset-slate-900 transition"
+      aria-label="Log out"
+    >
+      <LogOut className="h-3.5 w-3.5" />
+      <span className="hidden sm:inline">Logout</span>
+    </button>
+  </div>
+</header>
 
       {/* Main Workspace Frame */}
       <div className="flex-1 flex flex-col md:flex-row max-w-[1440px] mx-auto w-full">

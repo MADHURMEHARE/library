@@ -1,20 +1,19 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React, { useState, useEffect } from "react";
 import { User, Organization } from "./types";
+
 import { LoginScreen } from "./components/LoginScreen";
 import { SuperAdminDashboard } from "./components/SuperAdminDashboard";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { apiCall } from "./api";
-
+import { LandingPage } from "./components/LandingPage";
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [initialized, setInitialized] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Which unauthenticated screen to show: marketing landing page first, login on demand
+  const [view, setView] = useState<"landing" | "login">("landing");
 
   // Global dark mode state
   const [darkMode, setDarkMode] = useState(() => {
@@ -74,6 +73,7 @@ export default function App() {
     localStorage.removeItem("saas_jwt_token");
     setCurrentUser(null);
     setOrganization(null);
+    setView("landing");
   };
 
   if (!initialized || loading) {
@@ -89,6 +89,15 @@ export default function App() {
 
   // Router dispatcher based on User role
   if (!currentUser) {
+    if (view === "landing") {
+      return (
+        <LandingPage
+          onGetStarted={() => setView("login")}
+          darkMode={darkMode}
+          setDarkMode={setDarkMode}
+        />
+      );
+    }
     return <LoginScreen onLoginSuccess={handleLoginSuccess} darkMode={darkMode} setDarkMode={setDarkMode} />;
   }
 
@@ -109,10 +118,10 @@ export default function App() {
         <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
           <div className="max-w-md space-y-4">
             <h2 className="font-display font-bold text-lg text-slate-800 dark:text-slate-200">No Organization Associated</h2>
-            <p className="text-xs text-slate-500 leading-normal">Your account does not have an active subscription or organization link on OmniPass. Please contact Super Admin support.</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-normal">Your account does not have an active subscription or organization link on OmniPass. Please contact Super Admin support.</p>
             <button
               onClick={handleLogout}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 transition"
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950 transition"
             >
               Sign Out
             </button>
