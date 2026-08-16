@@ -1,0 +1,17 @@
+[
+  {
+    "id": "org-1",
+    "name": "Athena Study Center",
+    "logo": "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?q=80&w=200&auto=format&fit=crop",
+    "address": "Suite 404, Education Enclave, New Delhi, India",
+    "phone": "+91 98765 43210",
+    "email": "contact@athenastudy.com",
+    "openingTime": "06:00",
+    "closingTime": "23:00",
+    "currency": "INR",
+    "timezone": "Asia/Kolkata",
+    "status": "active",
+    "planId": "premium",
+    "createdAt": "2026-08-16T08:27:51.511Z"
+  }
+]

@@ -8,6 +8,8 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { dbStore } from "./server/dbStore";
+import { runSeed } from "./server/db/seed";
+import { runMigration } from "./server/db/migrate";
 import jwt from "jsonwebtoken";
 import {
   Organization,
@@ -59,6 +61,11 @@ function logAction(userId: string, userName: string, orgId: string | null, actio
     timestamp: new Date().toISOString()
   });
 }
+
+// Health Check Endpoint
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", service: "studysphere-saas", timestamp: new Date().toISOString() });
+});
 
 // Authentication Middleware
 const authenticateToken = (req: any, res: express.Response, next: express.NextFunction) => {
@@ -127,7 +134,7 @@ app.post("/api/auth/login", (req, res) => {
   }
 
   // Find user
-  const user = dbStore.getUsers().find(u => u.email.toLowerCase() === email.toLowerCase());
+  const user = dbStore.getUsers().find(u => u.email && email && u.email.toLowerCase() === email.toLowerCase());
   if (!user) {
     return res.status(401).json({ error: "Invalid email or password" });
   }
@@ -485,7 +492,7 @@ app.post("/api/students", authenticateToken, requireTenant, (req: any, res) => {
   const {
     orgId, name, gender, dob, phone, parentPhone, email, address,
     emergencyContact, govIdType, govIdNumber, notes, college, course,
-    year, batch, joinDate, photo
+    year, batch, joinDate, photo, status
   } = req.body;
 
   if (!orgId || !name || !phone) {
@@ -529,7 +536,7 @@ app.post("/api/students", authenticateToken, requireTenant, (req: any, res) => {
     batch: batch || "Full Day",
     joinDate: joinDate || new Date().toISOString().split("T")[0],
     qrCode: `${studentId}-${orgId}`,
-    status: "inactive", // inactive until membership plan is purchased
+    status: status || "active",
     createdAt: new Date().toISOString()
   };
 
@@ -959,7 +966,7 @@ app.delete("/api/memberships/:id", authenticateToken, (req: any, res) => {
 // ==========================================
 
 // Get memberships expiring soon
-app.get("/api/reports/expiring", (req, res) => {
+app.get("/api/reports/expiring", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId, days = 10 } = req.query;
   if (!orgId) return res.status(400).json({ error: "orgId is required" });
 
@@ -996,7 +1003,7 @@ app.get("/api/reports/expiring", (req, res) => {
 });
 
 // Get pending administrative actions
-app.get("/api/reports/pending-actions", (req, res) => {
+app.get("/api/reports/pending-actions", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId } = req.query;
   if (!orgId) return res.status(400).json({ error: "orgId is required" });
 
@@ -1101,10 +1108,14 @@ app.get("/api/reports/pending-actions", (req, res) => {
 });
 
 // Settle outstanding payment balance dues
-app.put("/api/payments/:id/settle", (req, res) => {
+app.put("/api/payments/:id/settle", authenticateToken, (req: any, res) => {
   const { id } = req.params;
   const pay = dbStore.getPayments().find(p => p.id === id);
   if (!pay) return res.status(404).json({ error: "Payment record not found" });
+
+  if (req.user.role !== "SUPER_ADMIN" && pay.orgId !== req.user.orgId) {
+    return res.status(403).json({ error: "Access denied." });
+  }
 
   dbStore.updatePayment(id, {
     netPaid: pay.amount - pay.discount,
@@ -1113,7 +1124,7 @@ app.put("/api/payments/:id/settle", (req, res) => {
   });
 
   const updated = dbStore.getPayments().find(p => p.id === id);
-  logAction("unknown", "Staff", pay?.orgId || null, "SETTLE_PAYMENT", `Settled outstanding dues balance for payment receipt ${pay.id}`);
+  logAction(req.user.id || "unknown", req.user.name || "Staff", pay?.orgId || null, "SETTLE_PAYMENT", `Settled outstanding dues balance for payment receipt ${pay.id}`);
   res.json({ success: true, payment: updated });
 });
 
@@ -1151,9 +1162,100 @@ app.post("/api/layout/floors", authenticateToken, requireTenant, (req: any, res)
 
 app.post("/api/layout/rooms", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId, floorId, name } = req.body;
-  const newRm = { id: `rm-${Date.now()}`, orgId, floorId, name, createdAt: new Date().toISOString() };
+  let targetFloorId = floorId;
+
+  // Auto-create Building and Floor if not present
+  if (!targetFloorId) {
+    let bld = dbStore.getBuildings().find(b => b.orgId === orgId);
+    if (!bld) {
+      bld = { id: `bld-${Date.now()}`, orgId, name: "Main Campus", createdAt: new Date().toISOString() };
+      dbStore.addBuilding(bld);
+    }
+    let flr = dbStore.getFloors().find(f => f.orgId === orgId);
+    if (!flr) {
+      flr = { id: `flr-${Date.now()}`, orgId, buildingId: bld.id, name: "Ground Floor", createdAt: new Date().toISOString() };
+      dbStore.addFloor(flr);
+    }
+    targetFloorId = flr.id;
+  }
+
+  const newRm = { id: `rm-${Date.now()}`, orgId, floorId: targetFloorId, name: name || "Silent Study Zone", createdAt: new Date().toISOString() };
   dbStore.addRoom(newRm);
+  logAction(req.user.id, req.user.name || "Admin", orgId, "CREATE_ROOM", `Created study room ${newRm.name}`);
   res.json(newRm);
+});
+
+app.delete("/api/layout/rooms/:id", authenticateToken, (req: any, res) => {
+  const { id } = req.params;
+  const room = dbStore.getRooms().find(r => r.id === id);
+  if (!room) return res.status(404).json({ error: "Room not found" });
+
+  if (req.user.role !== "SUPER_ADMIN" && room.orgId !== req.user.orgId) {
+    return res.status(403).json({ error: "Access denied." });
+  }
+
+  // Also remove seats inside this room
+  const roomSeats = dbStore.getSeats().filter(s => s.roomId === id);
+  roomSeats.forEach(s => dbStore.deleteSeat(s.id));
+
+  dbStore.deleteRoom(id);
+  logAction(req.user.id, req.user.name || "Admin", room.orgId, "DELETE_ROOM", `Deleted room ${room.name} and ${roomSeats.length} associated seats`);
+  res.json({ success: true, deletedSeats: roomSeats.length });
+});
+
+// Quick-Setup Layout Wizard
+app.post("/api/layout/quick-setup", authenticateToken, requireTenant, (req: any, res) => {
+  const { orgId, roomName = "Main Study Hall", seatCount = 24, seatType = "AC" } = req.body;
+  if (!orgId) return res.status(400).json({ error: "orgId is required" });
+
+  let bld = dbStore.getBuildings().find(b => b.orgId === orgId);
+  if (!bld) {
+    bld = { id: `bld-${Date.now()}`, orgId, name: "Main Campus", createdAt: new Date().toISOString() };
+    dbStore.addBuilding(bld);
+  }
+
+  let flr = dbStore.getFloors().find(f => f.orgId === orgId && f.buildingId === bld.id);
+  if (!flr) {
+    flr = { id: `flr-${Date.now()}`, orgId, buildingId: bld.id, name: "Ground Floor", createdAt: new Date().toISOString() };
+    dbStore.addFloor(flr);
+  }
+
+  const room = { id: `rm-${Date.now()}`, orgId, floorId: flr.id, name: roomName, createdAt: new Date().toISOString() };
+  dbStore.addRoom(room);
+
+  const count = Math.min(Math.max(Number(seatCount) || 24, 1), 100);
+  const createdSeats: Seat[] = [];
+  const rows = ["Row A", "Row B", "Row C", "Row D", "Row E", "Row F"];
+
+  for (let i = 1; i <= count; i++) {
+    const rowIndex = Math.floor((i - 1) / 6);
+    const rowName = rows[rowIndex % rows.length];
+    const seatNo = `D-${i < 10 ? '0' + i : i}`;
+    const newSeat: Seat = {
+      id: `seat-${Date.now()}-${i}`,
+      orgId,
+      roomId: room.id,
+      seatNumber: seatNo,
+      type: seatType as any,
+      status: "available",
+      assignedStudentId: null,
+      notes: "High-speed Wi-Fi, personal charging socket, ergonomic chair & reading lamp.",
+      row: rowName,
+      createdAt: new Date().toISOString()
+    };
+    dbStore.addSeat(newSeat);
+    createdSeats.push(newSeat);
+  }
+
+  logAction(req.user.id, req.user.name || "Admin", orgId, "QUICK_SETUP_LAYOUT", `Quick initialized room '${roomName}' with ${createdSeats.length} study desks`);
+  res.json({
+    success: true,
+    building: bld,
+    floor: flr,
+    room,
+    seatsCount: createdSeats.length,
+    seats: createdSeats
+  });
 });
 
 app.post("/api/seats", authenticateToken, requireTenant, (req: any, res) => {
@@ -1171,10 +1273,30 @@ app.post("/api/seats", authenticateToken, requireTenant, (req: any, res) => {
     });
   }
 
+  let targetRoomId = roomId;
+  if (!targetRoomId) {
+    let rm = dbStore.getRooms().find(r => r.orgId === orgId);
+    if (!rm) {
+      let bld = dbStore.getBuildings().find(b => b.orgId === orgId);
+      if (!bld) {
+        bld = { id: `bld-${Date.now()}`, orgId, name: "Main Campus", createdAt: new Date().toISOString() };
+        dbStore.addBuilding(bld);
+      }
+      let flr = dbStore.getFloors().find(f => f.orgId === orgId);
+      if (!flr) {
+        flr = { id: `flr-${Date.now()}`, orgId, buildingId: bld.id, name: "Ground Floor", createdAt: new Date().toISOString() };
+        dbStore.addFloor(flr);
+      }
+      rm = { id: `rm-${Date.now()}`, orgId, floorId: flr.id, name: "Main Hall", createdAt: new Date().toISOString() };
+      dbStore.addRoom(rm);
+    }
+    targetRoomId = rm.id;
+  }
+
   const newSeat: Seat = {
     id: `seat-${Date.now()}`,
     orgId,
-    roomId,
+    roomId: targetRoomId,
     seatNumber,
     type: type || "AC",
     status: "available",
@@ -1184,7 +1306,85 @@ app.post("/api/seats", authenticateToken, requireTenant, (req: any, res) => {
     createdAt: new Date().toISOString()
   };
   dbStore.addSeat(newSeat);
+  logAction(req.user.id, req.user.name || "Admin", orgId, "CREATE_SEAT", `Created seat ${seatNumber}`);
   res.json(newSeat);
+});
+
+// Batch generate multiple desks
+app.post("/api/seats/batch", authenticateToken, requireTenant, (req: any, res) => {
+  const { orgId, roomId, prefix = "S-", startNumber = 1, count = 10, type = "AC", row = "Row A", notes } = req.body;
+  if (!orgId) return res.status(400).json({ error: "orgId is required" });
+
+  let targetRoomId = roomId;
+  if (!targetRoomId) {
+    let rm = dbStore.getRooms().find(r => r.orgId === orgId);
+    if (!rm) {
+      let bld = dbStore.getBuildings().find(b => b.orgId === orgId);
+      if (!bld) {
+        bld = { id: `bld-${Date.now()}`, orgId, name: "Main Campus", createdAt: new Date().toISOString() };
+        dbStore.addBuilding(bld);
+      }
+      let flr = dbStore.getFloors().find(f => f.orgId === orgId);
+      if (!flr) {
+        flr = { id: `flr-${Date.now()}`, orgId, buildingId: bld.id, name: "Ground Floor", createdAt: new Date().toISOString() };
+        dbStore.addFloor(flr);
+      }
+      rm = { id: `rm-${Date.now()}`, orgId, floorId: flr.id, name: "Main Study Room", createdAt: new Date().toISOString() };
+      dbStore.addRoom(rm);
+    }
+    targetRoomId = rm.id;
+  }
+
+  const org = dbStore.getOrganizations().find(o => o.id === orgId);
+  const planId = org?.planId || "basic";
+  const limitObj = SAAS_PLANS.find(p => p.id === planId) || SAAS_PLANS[0];
+  const currentSeatsCount = dbStore.getSeats().filter(s => s.orgId === orgId).length;
+
+  const numToCreate = Math.min(Math.max(Number(count) || 1, 1), 100);
+  if (currentSeatsCount + numToCreate > limitObj.maxSeats) {
+    return res.status(403).json({
+      error: `Upgrade Required: Your current plan (${limitObj.name}) allows a maximum of ${limitObj.maxSeats} seats. Generating ${numToCreate} seats would exceed your quota (${currentSeatsCount} existing).`
+    });
+  }
+
+  const created: Seat[] = [];
+  const start = Number(startNumber) || 1;
+
+  for (let i = 0; i < numToCreate; i++) {
+    const num = start + i;
+    const seatNo = `${prefix}${num < 10 ? '0' + num : num}`;
+    const newSeat: Seat = {
+      id: `seat-${Date.now()}-${i}`,
+      orgId,
+      roomId: targetRoomId,
+      seatNumber: seatNo,
+      type: type || "AC",
+      status: "available",
+      assignedStudentId: null,
+      notes: notes || "Dedicated study space with charging point & reading lamp.",
+      row: row || `Row ${Math.floor(i / 6) + 1}`,
+      createdAt: new Date().toISOString()
+    };
+    dbStore.addSeat(newSeat);
+    created.push(newSeat);
+  }
+
+  logAction(req.user.id, req.user.name || "Admin", orgId, "BATCH_CREATE_SEATS", `Batch generated ${created.length} seats (from ${created[0]?.seatNumber} to ${created[created.length - 1]?.seatNumber})`);
+  res.json({ success: true, count: created.length, seats: created });
+});
+
+app.delete("/api/seats/:id", authenticateToken, (req: any, res) => {
+  const { id } = req.params;
+  const seat = dbStore.getSeats().find(s => s.id === id);
+  if (!seat) return res.status(404).json({ error: "Seat not found" });
+
+  if (req.user.role !== "SUPER_ADMIN" && seat.orgId !== req.user.orgId) {
+    return res.status(403).json({ error: "Access denied." });
+  }
+
+  dbStore.deleteSeat(id);
+  logAction(req.user.id, req.user.name || "Admin", seat.orgId, "DELETE_SEAT", `Deleted seat ${seat.seatNumber}`);
+  res.json({ success: true });
 });
 
 app.put("/api/seats/:id", authenticateToken, (req: any, res) => {
@@ -1199,12 +1399,16 @@ app.put("/api/seats/:id", authenticateToken, (req: any, res) => {
   }
 
   dbStore.updateSeat(id, data);
-  res.json(dbStore.getSeats().find(s => s.id === id));
+  const updated = dbStore.getSeats().find(s => s.id === id);
+  logAction(req.user.id, req.user.name || "Admin", seat.orgId, "UPDATE_SEAT", `Updated seat ${seat.seatNumber} configuration`);
+  res.json(updated);
 });
 
 // Seat Transfers, Blocks, Releases
-app.post("/api/seats/actions", (req, res) => {
-  const { action, orgId, seatId, studentId, targetSeatId, notes, creatorId, creatorName } = req.body;
+app.post("/api/seats/actions", authenticateToken, requireTenant, (req: any, res) => {
+  const { action, orgId, seatId, studentId, targetSeatId, notes } = req.body;
+  const creatorId = req.user.id || "unknown";
+  const creatorName = req.user.name || "Staff";
   if (!orgId || !action) return res.status(400).json({ error: "Missing parameters" });
 
   const seat = dbStore.getSeats().find(s => s.id === seatId);
@@ -1225,14 +1429,14 @@ app.post("/api/seats/actions", (req, res) => {
         timestamp: new Date().toISOString()
       });
     }
-    logAction(creatorId || "unknown", creatorName || "Staff", orgId, "RELEASE_SEAT", `Released seat ${seat.seatNumber}`);
+    logAction(creatorId, creatorName, orgId, "RELEASE_SEAT", `Released seat ${seat.seatNumber}`);
     return res.json({ success: true });
   }
 
-  if (action === "block") {
+  if (action === "block" || action === "maintenance") {
     if (!seat) return res.status(404).json({ error: "Seat not found" });
     dbStore.updateSeat(seatId, { status: "maintenance", assignedStudentId: null });
-    logAction(creatorId || "unknown", creatorName || "Staff", orgId, "BLOCK_SEAT", `Blocked seat ${seat.seatNumber} for maintenance`);
+    logAction(creatorId, creatorName, orgId, "BLOCK_SEAT", `Blocked seat ${seat.seatNumber} for maintenance`);
     return res.json({ success: true });
   }
 
@@ -1260,7 +1464,7 @@ app.post("/api/seats/actions", (req, res) => {
       timestamp: new Date().toISOString()
     });
 
-    logAction(creatorId || "unknown", creatorName || "Staff", orgId, "TRANSFER_SEAT", `Transferred student ID ${studentId} from seat ${seat.seatNumber} to ${targetSeat.seatNumber}`);
+    logAction(creatorId, creatorName, orgId, "TRANSFER_SEAT", `Transferred student ID ${studentId} from seat ${seat.seatNumber} to ${targetSeat.seatNumber}`);
     return res.json({ success: true });
   }
 
@@ -1285,7 +1489,7 @@ app.post("/api/seats/actions", (req, res) => {
       timestamp: new Date().toISOString()
     });
 
-    logAction(creatorId || "unknown", creatorName || "Staff", orgId, "ASSIGN_SEAT", `Assigned seat ${seat.seatNumber} to student ${studentId}`);
+    logAction(creatorId, creatorName, orgId, "ASSIGN_SEAT", `Assigned seat ${seat.seatNumber} to student ${studentId}`);
     return res.json({ success: true });
   }
 
@@ -1297,7 +1501,7 @@ app.post("/api/seats/actions", (req, res) => {
 // ATTENDANCE MANAGEMENT
 // ==========================================
 
-app.get("/api/attendance", (req, res) => {
+app.get("/api/attendance", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId, date } = req.query;
   if (!orgId) return res.status(400).json({ error: "orgId is required" });
 
@@ -1309,8 +1513,10 @@ app.get("/api/attendance", (req, res) => {
 });
 
 // Scan QR or Manual Check-in / Check-out
-app.post("/api/attendance/check", (req, res) => {
-  const { orgId, studentId, qrCode, method, creatorId, creatorName } = req.body;
+app.post("/api/attendance/check", authenticateToken, requireTenant, (req: any, res) => {
+  const { orgId, studentId, qrCode, method } = req.body;
+  const creatorId = req.user.id || "unknown";
+  const creatorName = req.user.name || "Attendance System";
   if (!orgId) return res.status(400).json({ error: "orgId is required" });
 
   let student: Student | undefined;
@@ -1343,13 +1549,13 @@ app.post("/api/attendance/check", (req, res) => {
       status: "present"
     };
     dbStore.addAttendance(attendance);
-    logAction(creatorId || "unknown", creatorName || "Attendance System", orgId, "CHECK_IN", `Checked in student ${student.name} (${student.studentId}) via ${method || 'manual'}`);
+    logAction(creatorId, creatorName, orgId, "CHECK_IN", `Checked in student ${student.name} (${student.studentId}) via ${method || 'manual'}`);
     return res.json({ message: `${student.name} checked in successfully at ${currentTimeStr}.`, attendance });
   } else if (!attendance.checkOutTime) {
     // Record Check-out
     dbStore.updateAttendance(attendance.id, { checkOutTime: currentTimeStr });
     attendance = dbStore.getAttendances().find(a => a.id === attendance!.id);
-    logAction(creatorId || "unknown", creatorName || "Attendance System", orgId, "CHECK_OUT", `Checked out student ${student.name} (${student.studentId})`);
+    logAction(creatorId, creatorName, orgId, "CHECK_OUT", `Checked out student ${student.name} (${student.studentId})`);
     return res.json({ message: `${student.name} checked out successfully at ${currentTimeStr}.`, attendance });
   } else {
     return res.status(400).json({ error: "Student has already completed check-in and check-out for today." });
@@ -1361,26 +1567,26 @@ app.post("/api/attendance/check", (req, res) => {
 // REVENUE & EXPENSE & PAYMENTS
 // ==========================================
 
-app.get("/api/payments", (req, res) => {
+app.get("/api/payments", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId } = req.query;
   if (!orgId) return res.status(400).json({ error: "orgId is required" });
   res.json(dbStore.getPayments().filter(p => p.orgId === orgId));
 });
 
-app.get("/api/payments/invoices", (req, res) => {
+app.get("/api/payments/invoices", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId } = req.query;
   if (!orgId) return res.status(400).json({ error: "orgId is required" });
   res.json(dbStore.getInvoices().filter(i => i.orgId === orgId));
 });
 
 // Expenses
-app.get("/api/expenses", (req, res) => {
+app.get("/api/expenses", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId } = req.query;
   if (!orgId) return res.status(400).json({ error: "orgId is required" });
   res.json(dbStore.getExpenses().filter(e => e.orgId === orgId));
 });
 
-app.post("/api/expenses", (req, res) => {
+app.post("/api/expenses", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId, title, category, amount, date, description } = req.body;
   if (!orgId || !title || !amount) return res.status(400).json({ error: "Missing required parameters." });
 
@@ -1394,14 +1600,17 @@ app.post("/api/expenses", (req, res) => {
     description: description || ""
   };
   dbStore.addExpense(newExp);
-  logAction("unknown", "Admin", orgId, "RECORD_EXPENSE", `Recorded expense: ${title} (${amount} INR)`);
+  logAction(req.user.id || "unknown", req.user.name || "Admin", orgId, "RECORD_EXPENSE", `Recorded expense: ${title} (${amount} INR)`);
   res.json(newExp);
 });
 
-app.delete("/api/expenses/:id", (req, res) => {
+app.delete("/api/expenses/:id", authenticateToken, (req: any, res) => {
   const { id } = req.params;
   const exp = dbStore.getExpenses().find(e => e.id === id);
   if (!exp) return res.status(404).json({ error: "Expense not found" });
+  if (req.user.role !== "SUPER_ADMIN" && exp.orgId !== req.user.orgId) {
+    return res.status(403).json({ error: "Access denied." });
+  }
   dbStore.deleteExpense(id);
   res.json({ success: true });
 });
@@ -1411,14 +1620,19 @@ app.delete("/api/expenses/:id", (req, res) => {
 // NOTIFICATIONS
 // ==========================================
 
-app.get("/api/notifications", (req, res) => {
+app.get("/api/notifications", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId } = req.query;
   if (!orgId) return res.status(400).json({ error: "orgId is required" });
   res.json(dbStore.getNotifications().filter(n => n.orgId === orgId));
 });
 
-app.put("/api/notifications/:id", (req, res) => {
+app.put("/api/notifications/:id", authenticateToken, (req: any, res) => {
   const { id } = req.params;
+  const notif = dbStore.getNotifications().find(n => n.id === id);
+  if (!notif) return res.status(404).json({ error: "Notification not found" });
+  if (req.user.role !== "SUPER_ADMIN" && notif.orgId !== req.user.orgId) {
+    return res.status(403).json({ error: "Access denied." });
+  }
   dbStore.updateNotification(id, { status: "sent" });
   res.json({ success: true });
 });
@@ -1533,6 +1747,18 @@ app.post("/api/whatsapp/trigger-renewals", authenticateToken, requireTenant, (re
     config = dbStore.getWhatsAppConfigs().find(c => c.orgId === orgId)!;
   }
 
+  const defaultTemplates = {
+    welcome: "Welcome to {{org_name}}, {{name}}!",
+    upcomingRenewal: "Hi {{name}}, your membership at {{org_name}} expires in {{days}} days ({{end_date}}). Please renew to retain seat {{seat_number}}.",
+    expiredAlert: "Hi {{name}}, your membership at {{org_name}} has expired on {{end_date}}. Seat {{seat_number}} has been released.",
+    paymentReceipt: "Hi {{name}}, payment of {{currency}} {{amount}} received for {{plan_name}} at {{org_name}}."
+  };
+
+  const templates = {
+    ...defaultTemplates,
+    ...(config?.templates || {})
+  };
+
   const today = simulateDate ? new Date(simulateDate) : new Date();
   const todayStr = today.toISOString().split("T")[0];
 
@@ -1562,7 +1788,7 @@ app.post("/api/whatsapp/trigger-renewals", authenticateToken, requireTenant, (re
     const timeDiff = end.getTime() - today.getTime();
     const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24));
 
-    if (m.status === "active" && daysDiff > 0 && daysDiff <= config!.triggerDaysBefore) {
+    if (m.status === "active" && daysDiff > 0 && daysDiff <= (config?.triggerDaysBefore || 3)) {
       const logs = dbStore.getWhatsAppLogs().filter(l => l.orgId === orgId && l.studentId === student.id && l.type === "upcomingRenewal");
       const alreadySent = logs.some(l => {
         const logDate = l.timestamp.split("T")[0];
@@ -1570,7 +1796,7 @@ app.post("/api/whatsapp/trigger-renewals", authenticateToken, requireTenant, (re
       });
 
       if (!alreadySent) {
-        const template = config!.templates.upcomingRenewal;
+        const template = templates.upcomingRenewal;
         const msg = replaceTemplatePlaceholders(template, {
           name: student.name,
           org_name: org.name,
@@ -1657,7 +1883,7 @@ app.post("/api/whatsapp/trigger-renewals", authenticateToken, requireTenant, (re
           issuedAt: new Date().toISOString()
         });
 
-        const template = config!.templates.paymentReceipt;
+        const template = templates.paymentReceipt;
         const msg = replaceTemplatePlaceholders(template, {
           name: student.name,
           org_name: org.name,
@@ -1721,7 +1947,7 @@ app.post("/api/whatsapp/trigger-renewals", authenticateToken, requireTenant, (re
 
         dbStore.updateStudent(student.id, { status: "expired" });
 
-        const template = config!.templates.expiredAlert;
+        const template = templates.expiredAlert;
         const msg = replaceTemplatePlaceholders(template, {
           name: student.name,
           org_name: org.name,
@@ -1826,18 +2052,25 @@ app.delete("/api/announcements/:id", authenticateToken, (req: any, res) => {
 
 
 // ==========================================
-// SEEDING BACKWARD PATH
+// SEEDING & MIGRATION APIs
 // ==========================================
-app.post("/api/reset-db", authenticateToken, requireSuperAdmin, (req, res) => {
-  // Simple safety endpoint to reset DB
+app.post("/api/reset-db", authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
-    const DB_FILE = path.join(process.cwd(), "db.json");
-    if (fs.existsSync(DB_FILE)) {
-      fs.unlinkSync(DB_FILE);
-    }
-    res.json({ success: true, message: "Database reset to defaults. Please reload the app." });
-  } catch (e) {
-    res.status(500).json({ error: "Reset failed" });
+    await runSeed();
+    await dbStore.initialize();
+    res.json({ success: true, message: "Database reset to structured separate collections successfully. Please refresh." });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || "Reset failed" });
+  }
+});
+
+app.post("/api/migrate-db", authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const result = await runMigration();
+    await dbStore.initialize();
+    res.json({ success: result.success, result });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || "Migration failed" });
   }
 });
 

@@ -48,7 +48,13 @@ import {
   Upload,
   Image,
   Link,
-  Edit
+  Edit,
+  Zap,
+  Wrench,
+  UserPlus,
+  ArrowRightLeft,
+  SlidersHorizontal,
+  Building2
 } from "lucide-react";
 import {
   Student,
@@ -175,7 +181,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 5 * 1024 * 1024) {
-        alert("Image file size should be less than 5MB.");
+        Swal.fire({
+          icon: "warning",
+          title: "File Too Large",
+          text: "Image file size should be less than 5MB.",
+          background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+          color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+        });
         return;
       }
       const reader = new FileReader();
@@ -195,7 +207,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setStudentForm({
       name: "", gender: "male", dob: "2002-01-01", phone: "", parentPhone: "",
       email: "", address: "", emergencyContact: "", govIdType: "Aadhaar", govIdNumber: "",
-      college: "", course: "", year: "3rd Year", batch: "Full Day batch", joinDate: "", notes: "", photo: ""
+      college: "", course: "", year: "3rd Year", batch: "Full Day batch", joinDate: "", notes: "", photo: "",
+      status: "active"
     });
   };
 
@@ -218,7 +231,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       batch: student.batch || "Full Day batch",
       joinDate: student.joinDate ? student.joinDate.split("T")[0] : "",
       notes: student.notes || "",
-      photo: student.photo || ""
+      photo: student.photo || "",
+      status: (student.status as any) || "active"
     });
     setIsStudentModalOpen(true);
   };
@@ -354,7 +368,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [studentForm, setStudentForm] = useState({
     name: "", gender: "male" as any, dob: "2002-01-01", phone: "", parentPhone: "",
     email: "", address: "", emergencyContact: "", govIdType: "Aadhaar", govIdNumber: "",
-    college: "", course: "", year: "3rd Year", batch: "Full Day batch", joinDate: "", notes: "", photo: ""
+    college: "", course: "", year: "3rd Year", batch: "Full Day batch", joinDate: "", notes: "", photo: "",
+    status: "active" as "active" | "inactive" | "suspended" | "expired"
   });
 
   const [planForm, setPlanForm] = useState({
@@ -372,9 +387,52 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     title: "", category: "Utilities", amount: "", date: new Date().toISOString().split("T")[0], description: ""
   });
 
-  // Seat Action state
+  // Seat Action & Layout Management state
   const [selectedSeat, setSelectedSeat] = useState<Seat | null>(null);
   const [transferTargetSeatId, setTransferTargetSeatId] = useState("");
+  const [selectedRoomId, setSelectedRoomId] = useState<string>("all");
+  const [seatStatusFilter, setSeatStatusFilter] = useState<"all" | "available" | "occupied" | "reserved" | "maintenance">("all");
+  const [seatTypeFilter, setSeatTypeFilter] = useState<"all" | "AC" | "Non-AC" | "Premium" | "Window">("all");
+  const [seatSearchQuery, setSeatSearchQuery] = useState("");
+
+  // Layout Creation Modals & Forms
+  const [isAddRoomModalOpen, setIsAddRoomModalOpen] = useState(false);
+  const [roomNameInput, setRoomNameInput] = useState("");
+
+  const [isAddSeatModalOpen, setIsAddSeatModalOpen] = useState(false);
+  const [seatForm, setSeatForm] = useState({
+    roomId: "",
+    seatNumber: "",
+    type: "AC" as "AC" | "Non-AC" | "Premium" | "Window",
+    row: "Row A",
+    notes: ""
+  });
+
+  const [isBatchSeatModalOpen, setIsBatchSeatModalOpen] = useState(false);
+  const [batchSeatForm, setBatchSeatForm] = useState({
+    roomId: "",
+    prefix: "D-",
+    startNumber: 1,
+    count: 24,
+    type: "AC" as "AC" | "Non-AC" | "Premium" | "Window",
+    row: "Row A",
+    notes: "High-speed Wi-Fi, personal charging socket, ergonomic chair & reading lamp."
+  });
+
+  const [isAssignSeatModalOpen, setIsAssignSeatModalOpen] = useState(false);
+  const [assignStudentId, setAssignStudentId] = useState("");
+
+  const [isEditSeatModalOpen, setIsEditSeatModalOpen] = useState(false);
+  const [editSeatForm, setEditSeatForm] = useState({
+    id: "",
+    seatNumber: "",
+    type: "AC" as "AC" | "Non-AC" | "Premium" | "Window",
+    row: "Row A",
+    notes: "",
+    status: "available" as "available" | "occupied" | "reserved" | "maintenance"
+  });
+
+  const [isQuickSetupLoading, setIsQuickSetupLoading] = useState(false);
 
   // Attendance scanner simulator
   const [qrCodeInput, setQrCodeInput] = useState("");
@@ -445,9 +503,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setLoadingWhatsApp(true);
       const res = await apiCall(`/api/whatsapp/config`, "PUT", whatsappConfig);
       setWhatsappConfig(res);
-      alert("WhatsApp Configuration and Templates updated successfully!");
+      Swal.fire({
+        icon: "success",
+        title: "Configuration Saved",
+        text: "WhatsApp Configuration and Templates updated successfully!",
+        timer: 2000,
+        showConfirmButton: false,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
     } catch (err: any) {
-      alert(err.message || "Failed to save configuration.");
+      Swal.fire({
+        icon: "error",
+        title: "Save Failed",
+        text: err.message || "Failed to save configuration.",
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
     } finally {
       setLoadingWhatsApp(false);
     }
@@ -456,7 +528,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleSendTestWhatsApp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!testForm.phone || !testForm.message) {
-      alert("Please enter a phone number and message.");
+      Swal.fire({
+        icon: "warning",
+        title: "Missing Fields",
+        text: "Please enter a phone number and message.",
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
       return;
     }
     try {
@@ -467,12 +545,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         type: testForm.type,
         message: testForm.message
       });
-      alert(`Test message processed! Status: ${res.status}`);
+      Swal.fire({
+        icon: "success",
+        title: "Test Dispatched",
+        text: `Test message processed! Status: ${res.status}`,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
       // Refresh logs
       const logsData = await apiCall(`/api/whatsapp/logs?orgId=${organization.id}`);
       setWhatsappLogs(logsData);
     } catch (err: any) {
-      alert(err.message || "Failed to send test message.");
+      Swal.fire({
+        icon: "error",
+        title: "Dispatch Error",
+        text: err.message || "Failed to send test message.",
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
     } finally {
       setLoadingWhatsApp(false);
     }
@@ -499,8 +589,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setMemberships(membershipsData);
       setExpiringMemberships(expiringData);
       setPendingActions(pendingActionsData);
+      Swal.fire({
+        icon: "success",
+        title: "Renewals Processed",
+        text: `Automated renewal workflow executed successfully! Checked ${res?.candidatesCount || 0} students.`,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
     } catch (err: any) {
-      alert(err.message || "Failed to run automated renewal trigger.");
+      Swal.fire({
+        icon: "error",
+        title: "Execution Error",
+        text: err.message || "Failed to run automated renewal trigger.",
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
     } finally {
       setTriggeringRenewals(false);
     }
@@ -512,7 +615,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       const res = await apiCall(`/api/whatsapp/config`, "PUT", updatedConfig);
       setWhatsappConfig(res);
     } catch (err: any) {
-      alert(err.message || "Failed to update configuration.");
+      Swal.fire({
+        icon: "error",
+        title: "Error",
+        text: err.message || "Failed to update configuration.",
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
     } finally {
       setLoadingWhatsApp(false);
     }
@@ -533,7 +642,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleCreateStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!studentForm.name || !studentForm.phone) {
-      alert("Student full name and mobile phone are mandatory.");
+      Swal.fire({
+        icon: "warning",
+        title: "Required Fields",
+        text: "Student full name and mobile phone are mandatory.",
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
       return;
     }
 
@@ -544,6 +659,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           editorId: currentUser.id,
           editorName: currentUser.name
         });
+        Swal.fire({
+          icon: "success",
+          title: "Student Updated",
+          text: "Student record has been updated successfully.",
+          timer: 1800,
+          showConfirmButton: false,
+          background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+          color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+        });
       } else {
         await apiCall("/api/students", "POST", {
           ...studentForm,
@@ -551,11 +675,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           creatorId: currentUser.id,
           creatorName: currentUser.name
         });
+        Swal.fire({
+          icon: "success",
+          title: "Student Enrolled",
+          text: "New student profile created successfully.",
+          timer: 1800,
+          showConfirmButton: false,
+          background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+          color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+        });
       }
       closeStudentModal();
       fetchTenantData();
     } catch (err: any) {
-      alert(err.message);
+      Swal.fire({
+        icon: "error",
+        title: "Operation Failed",
+        text: err.message,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
     }
   };
 
@@ -569,10 +708,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           ...planForm,
           orgId: organization.id
         });
+        Swal.fire({
+          icon: "success",
+          title: "Plan Updated",
+          text: "Membership plan has been updated successfully.",
+          timer: 1800,
+          showConfirmButton: false,
+          background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+          color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+        });
       } else {
         await apiCall("/api/plans", "POST", {
           ...planForm,
           orgId: organization.id
+        });
+        Swal.fire({
+          icon: "success",
+          title: "Plan Created",
+          text: "New membership plan created successfully.",
+          timer: 1800,
+          showConfirmButton: false,
+          background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+          color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
         });
       }
       setIsPlanModalOpen(false);
@@ -583,7 +740,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       });
       fetchTenantData();
     } catch (err: any) {
-      alert(err.message);
+      Swal.fire({
+        icon: "error",
+        title: "Plan Error",
+        text: err.message,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
     }
   };
 
@@ -643,7 +806,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     e.preventDefault();
     const { studentId, planId, startDate, endDate, paidAmount, paymentMethod, discount, couponCode, notes, assignSeatId, status } = membershipForm;
     if (!studentId || !planId || !startDate || !paidAmount) {
-      alert("Please fill in Student, Membership Plan, Start Date, and Paid Amount.");
+      Swal.fire({
+        icon: "warning",
+        title: "Incomplete Details",
+        text: "Please fill in Student, Membership Plan, Start Date, and Paid Amount.",
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
       return;
     }
 
@@ -662,6 +831,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           updaterId: currentUser.id,
           updaterName: currentUser.name
         });
+        Swal.fire({
+          icon: "success",
+          title: "Pass Updated",
+          text: "Student membership pass updated successfully.",
+          timer: 1800,
+          showConfirmButton: false,
+          background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+          color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+        });
       } else {
         await apiCall("/api/memberships", "POST", {
           orgId: organization.id,
@@ -678,6 +856,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           creatorId: currentUser.id,
           creatorName: currentUser.name
         });
+        Swal.fire({
+          icon: "success",
+          title: "Membership Issued",
+          text: "Student membership registered and receipt generated.",
+          timer: 1800,
+          showConfirmButton: false,
+          background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+          color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+        });
       }
 
       setIsMembershipModalOpen(false);
@@ -689,7 +876,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       });
       fetchTenantData();
     } catch (err: any) {
-      alert(err.message);
+      Swal.fire({
+        icon: "error",
+        title: "Membership Error",
+        text: err.message,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
     }
   };
 
@@ -762,9 +955,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setExpenseForm({
         title: "", category: "Utilities", amount: "", date: new Date().toISOString().split("T")[0], description: ""
       });
+      Swal.fire({
+        icon: "success",
+        title: "Expense Logged",
+        text: "Center expense logged successfully.",
+        timer: 1800,
+        showConfirmButton: false,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
       fetchTenantData();
     } catch (err: any) {
-      alert(err.message);
+      Swal.fire({
+        icon: "error",
+        title: "Expense Error",
+        text: err.message,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
     }
   };
 
@@ -945,9 +1153,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         creatorName: currentUser.name
       });
       setSelectedSeat(null);
+      Swal.fire({
+        icon: "success",
+        title: "Seat Blocked",
+        text: "Seat marked for maintenance.",
+        timer: 1500,
+        showConfirmButton: false,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
       fetchTenantData();
     } catch (err: any) {
-      alert(err.message);
+      Swal.fire({
+        icon: "error",
+        title: "Action Failed",
+        text: err.message,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
     }
   };
 
@@ -967,9 +1190,337 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       });
       setSelectedSeat(null);
       setTransferTargetSeatId("");
+      Swal.fire({
+        icon: "success",
+        title: "Seat Transferred",
+        text: "Student successfully transferred to new seat.",
+        timer: 1800,
+        showConfirmButton: false,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
       fetchTenantData();
     } catch (err: any) {
-      alert(err.message);
+      Swal.fire({
+        icon: "error",
+        title: "Transfer Failed",
+        text: err.message,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+    }
+  };
+
+  const handleUnblockSeat = async (seatId: string) => {
+    try {
+      await apiCall(`/api/seats/${seatId}`, "PUT", {
+        status: "available",
+        assignedStudentId: null
+      });
+      setSelectedSeat(null);
+      Swal.fire({
+        icon: "success",
+        title: "Desk Restored",
+        text: "Desk marked available for student assignment.",
+        timer: 1500,
+        showConfirmButton: false,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+      fetchTenantData();
+    } catch (err: any) {
+      Swal.fire({
+        icon: "error",
+        title: "Action Failed",
+        text: err.message,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+    }
+  };
+
+  const handleCreateRoom = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!roomNameInput.trim()) return;
+    try {
+      await apiCall("/api/layout/rooms", "POST", {
+        orgId: organization.id,
+        name: roomNameInput.trim()
+      });
+      setRoomNameInput("");
+      setIsAddRoomModalOpen(false);
+      Swal.fire({
+        icon: "success",
+        title: "Study Zone Created",
+        text: "New study room added successfully.",
+        timer: 1500,
+        showConfirmButton: false,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+      fetchTenantData();
+    } catch (err: any) {
+      Swal.fire({
+        icon: "error",
+        title: "Failed to create room",
+        text: err.message || "An error occurred",
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+    }
+  };
+
+  const handleDeleteRoom = async (roomId: string, roomName: string) => {
+    Swal.fire({
+      title: `Delete '${roomName}'?`,
+      text: "This will permanently remove this room and all associated study desks.",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#ef4444",
+      cancelButtonColor: "#64748b",
+      confirmButtonText: "Yes, delete room",
+      background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+      color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+    }).then(async (result) => {
+      if (result.isConfirmed) {
+        try {
+          await apiCall(`/api/layout/rooms/${roomId}`, "DELETE");
+          if (selectedRoomId === roomId) {
+            setSelectedRoomId("all");
+          }
+          if (selectedSeat && selectedSeat.roomId === roomId) {
+            setSelectedSeat(null);
+          }
+          Swal.fire({
+            icon: "success",
+            title: "Room Deleted",
+            timer: 1500,
+            showConfirmButton: false,
+            background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+            color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+          });
+          fetchTenantData();
+        } catch (err: any) {
+          Swal.fire({
+            icon: "error",
+            title: "Failed to delete room",
+            text: err.message,
+            background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+            color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+          });
+        }
+      }
+    });
+  };
+
+  const handleCreateSingleSeat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!seatForm.seatNumber.trim()) return;
+    try {
+      await apiCall("/api/seats", "POST", {
+        orgId: organization.id,
+        roomId: seatForm.roomId || rooms[0]?.id,
+        seatNumber: seatForm.seatNumber.trim().toUpperCase(),
+        type: seatForm.type,
+        row: seatForm.row || "Row A",
+        notes: seatForm.notes
+      });
+      setSeatForm({ roomId: "", seatNumber: "", type: "AC", row: "Row A", notes: "" });
+      setIsAddSeatModalOpen(false);
+      Swal.fire({
+        icon: "success",
+        title: "Desk Created",
+        text: "New study desk created successfully.",
+        timer: 1500,
+        showConfirmButton: false,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+      fetchTenantData();
+    } catch (err: any) {
+      Swal.fire({
+        icon: "error",
+        title: "Creation Failed",
+        text: err.message,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+    }
+  };
+
+  const handleBatchCreateSeats = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await apiCall("/api/seats/batch", "POST", {
+        orgId: organization.id,
+        roomId: batchSeatForm.roomId || rooms[0]?.id,
+        prefix: batchSeatForm.prefix,
+        startNumber: Number(batchSeatForm.startNumber) || 1,
+        count: Number(batchSeatForm.count) || 10,
+        type: batchSeatForm.type,
+        row: batchSeatForm.row,
+        notes: batchSeatForm.notes
+      });
+      setIsBatchSeatModalOpen(false);
+      Swal.fire({
+        icon: "success",
+        title: `${res.count || batchSeatForm.count} Desks Generated!`,
+        text: "Batch study desks created and mapped.",
+        timer: 1800,
+        showConfirmButton: false,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+      fetchTenantData();
+    } catch (err: any) {
+      Swal.fire({
+        icon: "error",
+        title: "Batch Generation Failed",
+        text: err.message,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+    }
+  };
+
+  const handleDeleteSeat = async (seatId: string, seatNumber: string) => {
+    Swal.fire({
+      title: `Delete Desk ${seatNumber}?`,
+      text: "Are you sure you want to permanently remove this desk?",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#ef4444",
+      cancelButtonColor: "#64748b",
+      confirmButtonText: "Yes, delete desk",
+      background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+      color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+    }).then(async (result) => {
+      if (result.isConfirmed) {
+        try {
+          await apiCall(`/api/seats/${seatId}`, "DELETE");
+          if (selectedSeat?.id === seatId) {
+            setSelectedSeat(null);
+          }
+          Swal.fire({
+            icon: "success",
+            title: "Desk Deleted",
+            timer: 1500,
+            showConfirmButton: false,
+            background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+            color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+          });
+          fetchTenantData();
+        } catch (err: any) {
+          Swal.fire({
+            icon: "error",
+            title: "Deletion Failed",
+            text: err.message,
+            background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+            color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+          });
+        }
+      }
+    });
+  };
+
+  const handleEditSeatSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editSeatForm.id) return;
+    try {
+      const updated = await apiCall(`/api/seats/${editSeatForm.id}`, "PUT", {
+        seatNumber: editSeatForm.seatNumber,
+        type: editSeatForm.type,
+        row: editSeatForm.row,
+        notes: editSeatForm.notes,
+        status: editSeatForm.status
+      });
+      setIsEditSeatModalOpen(false);
+      setSelectedSeat(updated);
+      Swal.fire({
+        icon: "success",
+        title: "Desk Updated",
+        timer: 1500,
+        showConfirmButton: false,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+      fetchTenantData();
+    } catch (err: any) {
+      Swal.fire({
+        icon: "error",
+        title: "Update Failed",
+        text: err.message,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+    }
+  };
+
+  const handleAssignStudentToSeat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedSeat || !assignStudentId) return;
+    try {
+      await apiCall("/api/seats/actions", "POST", {
+        action: "assign",
+        orgId: organization.id,
+        seatId: selectedSeat.id,
+        studentId: assignStudentId,
+        creatorId: currentUser.id,
+        creatorName: currentUser.name
+      });
+      setIsAssignSeatModalOpen(false);
+      setAssignStudentId("");
+      setSelectedSeat(null);
+      Swal.fire({
+        icon: "success",
+        title: "Desk Assigned!",
+        text: "Student successfully assigned to this desk.",
+        timer: 1500,
+        showConfirmButton: false,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+      fetchTenantData();
+    } catch (err: any) {
+      Swal.fire({
+        icon: "error",
+        title: "Assignment Failed",
+        text: err.message,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+    }
+  };
+
+  const handleQuickSetupLayout = async () => {
+    setIsQuickSetupLoading(true);
+    try {
+      const res = await apiCall("/api/layout/quick-setup", "POST", {
+        orgId: organization.id,
+        roomName: "Main Study Hall",
+        seatCount: 24,
+        seatType: "AC"
+      });
+      Swal.fire({
+        icon: "success",
+        title: "Study Layout Initialized!",
+        text: `Created Main Study Hall with ${res.seatsCount || 24} silent desks.`,
+        timer: 2000,
+        showConfirmButton: false,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+      await fetchTenantData();
+    } catch (err: any) {
+      Swal.fire({
+        icon: "error",
+        title: "Quick Setup Failed",
+        text: err.message,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+    } finally {
+      setIsQuickSetupLoading(false);
     }
   };
 
@@ -991,9 +1542,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       });
       setAttendanceMessage(res.message);
       setQrCodeInput("");
+      Swal.fire({
+        icon: "success",
+        title: "Attendance Scanned",
+        text: res.message,
+        timer: 2000,
+        showConfirmButton: false,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
       fetchTenantData();
     } catch (err: any) {
-      setAttendanceError(err.message || "Invalid QR Code or student inactive.");
+      const errMsg = err.message || "Invalid QR Code or student inactive.";
+      setAttendanceError(errMsg);
+      Swal.fire({
+        icon: "error",
+        title: "Scan Failed",
+        text: errMsg,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
     }
   };
 
@@ -1010,10 +1578,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         creatorId: currentUser.id,
         creatorName: currentUser.name
       });
-      alert(res.message);
+      Swal.fire({
+        icon: "success",
+        title: "Attendance Updated",
+        text: res.message,
+        timer: 1800,
+        showConfirmButton: false,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
       fetchTenantData();
     } catch (err: any) {
-      alert(err.message || "Failed to toggle attendance status.");
+      Swal.fire({
+        icon: "error",
+        title: "Attendance Error",
+        text: err.message || "Failed to toggle attendance status.",
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
     }
   };
 
@@ -1021,7 +1603,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleOneClickRenewal = (student: Student) => {
     const studentMemb = memberships.find(m => m.studentId === student.id);
     if (!studentMemb) {
-      alert("No previous membership found. Please create a new membership pass.");
+      Swal.fire({
+        icon: "info",
+        title: "No Previous Pass",
+        text: "No previous membership found. Please create a new membership pass.",
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
       return;
     }
     setMembershipForm({
@@ -1061,25 +1649,77 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         handleOneClickRenewal(action.student);
       }
     } else if (action.type === "pending_balance") {
-      if (confirm(`Do you want to record receipt of the remaining balance of ${action.payment.balance} INR?`)) {
-        try {
-          await apiCall(`/api/payments/${action.payment.id}/settle`, "PUT");
-          alert("Outstanding dues recorded and settled successfully!");
-          fetchTenantData();
-        } catch (err: any) {
-          alert(err.message || "Failed to settle dues.");
+      Swal.fire({
+        title: 'Settle Balance Dues?',
+        text: `Do you want to record receipt of the remaining balance of ${action.payment.balance} INR?`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#4f46e5',
+        cancelButtonColor: '#64748b',
+        confirmButtonText: 'Yes, settle dues!',
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      }).then(async (result) => {
+        if (result.isConfirmed) {
+          try {
+            await apiCall(`/api/payments/${action.payment.id}/settle`, "PUT");
+            Swal.fire({
+              icon: "success",
+              title: "Settled!",
+              text: "Outstanding dues recorded and settled successfully!",
+              timer: 1800,
+              showConfirmButton: false,
+              background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+              color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+            });
+            fetchTenantData();
+          } catch (err: any) {
+            Swal.fire({
+              icon: "error",
+              title: "Settlement Failed",
+              text: err.message || "Failed to settle dues.",
+              background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+              color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+            });
+          }
         }
-      }
+      });
     } else if (action.type === "seat_maintenance") {
-      if (confirm(`Do you want to release Seat ${action.seat.seatNumber} and mark it as Available?`)) {
-        try {
-          await apiCall(`/api/seats/${action.seat.id}`, "PUT", { status: "available" });
-          alert(`Seat ${action.seat.seatNumber} is now restored to available status!`);
-          fetchTenantData();
-        } catch (err: any) {
-          alert(err.message || "Failed to restore seat status.");
+      Swal.fire({
+        title: 'Restore Seat?',
+        text: `Do you want to release Seat ${action.seat.seatNumber} and mark it as Available?`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#4f46e5',
+        cancelButtonColor: '#64748b',
+        confirmButtonText: 'Yes, restore seat!',
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      }).then(async (result) => {
+        if (result.isConfirmed) {
+          try {
+            await apiCall(`/api/seats/${action.seat.id}`, "PUT", { status: "available" });
+            Swal.fire({
+              icon: "success",
+              title: "Seat Restored",
+              text: `Seat ${action.seat.seatNumber} is now restored to available status!`,
+              timer: 1800,
+              showConfirmButton: false,
+              background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+              color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+            });
+            fetchTenantData();
+          } catch (err: any) {
+            Swal.fire({
+              icon: "error",
+              title: "Restore Failed",
+              text: err.message || "Failed to restore seat status.",
+              background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+              color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+            });
+          }
         }
-      }
+      });
     }
   };
 
@@ -1101,7 +1741,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Simulated CSV/Excel/PDF Exports
   const handleExport = (reportType: string) => {
-    alert(`Generating high resolution printable report for: ${reportType}. Triggering automatic browser PDF print layout.`);
+    Swal.fire({
+      icon: "info",
+      title: "Generating Report",
+      text: `Preparing high-resolution printable report for: ${reportType}. Triggering browser print layout.`,
+      timer: 2000,
+      showConfirmButton: false,
+      background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+      color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+    });
     window.print();
   };
 
@@ -1419,17 +2067,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             MANAGEMENT
           </span>
 
-          <button
-            onClick={() => { setActiveTab("whatsapp"); setMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
-              activeTab === "whatsapp"
-                ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
-                : "text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
-            }`}
-          >
-            <MessageSquare className="h-4 w-4" />
-            <span>WhatsApp &amp; Renewal</span>
-          </button>
+          {currentUser.role !== "RECEPTIONIST" && (
+            <button
+              onClick={() => { setActiveTab("whatsapp"); setMobileMenuOpen(false); }}
+              className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                activeTab === "whatsapp"
+                  ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
+                  : "text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
+              }`}
+            >
+              <MessageSquare className="h-4 w-4" />
+              <span>WhatsApp &amp; Renewal</span>
+            </button>
+          )}
 
           <button
             onClick={() => { setActiveTab("logs"); setMobileMenuOpen(false); }}
@@ -2088,7 +2738,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         onClick={async () => {
                           await handleQuickSaveWhatsAppConfig(whatsappConfig);
                           setIsExpiringTemplateModalOpen(false);
-                          alert("Renewal template saved successfully!");
+                          Swal.fire({
+                            icon: "success",
+                            title: "Blueprint Saved",
+                            text: "Renewal template saved successfully!",
+                            timer: 1800,
+                            showConfirmButton: false,
+                            background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+                            color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+                          });
                         }}
                         className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 transition"
                       >
@@ -2170,9 +2828,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             const logsData = await apiCall(`/api/whatsapp/logs?orgId=${organization.id}`);
                             setWhatsappLogs(logsData);
                             setSelectedExpiringStudent(null);
-                            alert("Mock WhatsApp Alert sent and logged successfully!");
+                            Swal.fire({
+                              icon: "success",
+                              title: "WhatsApp Dispatched",
+                              text: "WhatsApp Alert sent and logged successfully!",
+                              timer: 2000,
+                              showConfirmButton: false,
+                              background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+                              color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+                            });
                           } catch (err: any) {
-                            alert(err.message || "Failed to dispatch message.");
+                            Swal.fire({
+                              icon: "error",
+                              title: "Dispatch Failed",
+                              text: err.message || "Failed to dispatch message.",
+                              background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+                              color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+                            });
                           } finally {
                             setSendingQuickWhatsApp(false);
                           }
@@ -2519,191 +3191,640 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {/* 3. SEAT WORKSPACE & GRID LAYOUT */}
           {activeTab === "seats" && (
             <div className="space-y-6">
+              {/* Header & Quick Action Buttons */}
               <div className="border-b border-slate-100 pb-4 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h2 className="font-display font-bold text-xl text-slate-900 dark:text-white">Silent Study Zone Map</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Physical seat layout and allocation engine.</p>
+                  <h2 className="font-display font-bold text-xl text-slate-900 dark:text-white flex items-center gap-2">
+                    <Grid className="h-5 w-5 text-indigo-600" />
+                    Visual Seat Layout &amp; Desk Maps
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Interactive spatial desk mapping, real-time allocation status &amp; zone management.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (rooms.length > 0) {
+                        setBatchSeatForm(prev => ({ ...prev, roomId: rooms[0].id }));
+                      }
+                      setIsBatchSeatModalOpen(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800 transition shadow-2xs"
+                  >
+                    <Zap className="h-3.5 w-3.5 text-amber-500" />
+                    Batch Generator
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (rooms.length > 0) {
+                        setSeatForm(prev => ({ ...prev, roomId: rooms[0].id }));
+                      }
+                      setIsAddSeatModalOpen(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800 transition shadow-2xs"
+                  >
+                    <Plus className="h-3.5 w-3.5 text-indigo-600" />
+                    Add Desk
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddRoomModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-indigo-700 transition shadow-xs"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add Study Zone
+                  </button>
+                </div>
+              </div>
+
+              {/* Statistical KPI Row */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
+                <div className="rounded-xl border border-slate-200 bg-white p-4 dark:bg-slate-900 dark:border-slate-800 shadow-2xs">
+                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Total Desks</span>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <span className="text-2xl font-bold font-mono text-slate-900 dark:text-white">{seats.length}</span>
+                    <span className="text-[10px] text-slate-400 font-medium">{rooms.length} {rooms.length === 1 ? 'Zone' : 'Zones'}</span>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-4 dark:bg-emerald-950/20 dark:border-emerald-900/30 shadow-2xs">
+                  <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider block">Available</span>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <span className="text-2xl font-bold font-mono text-emerald-700 dark:text-emerald-300">
+                      {seats.filter(s => s.status === 'available').length}
+                    </span>
+                    <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-100/80 dark:bg-emerald-900/50 px-1.5 py-0.5 rounded">
+                      {seats.length > 0 ? Math.round((seats.filter(s => s.status === 'available').length / seats.length) * 100) : 0}% Free
+                    </span>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-4 dark:bg-indigo-950/20 dark:border-indigo-900/30 shadow-2xs">
+                  <span className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-400 uppercase tracking-wider block">Occupied</span>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <span className="text-2xl font-bold font-mono text-indigo-700 dark:text-indigo-300">
+                      {seats.filter(s => s.status === 'occupied').length}
+                    </span>
+                    <span className="text-[10px] font-semibold text-indigo-600 bg-indigo-100/80 dark:bg-indigo-900/50 px-1.5 py-0.5 rounded">
+                      {seats.length > 0 ? Math.round((seats.filter(s => s.status === 'occupied').length / seats.length) * 100) : 0}% Filled
+                    </span>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-red-100 bg-red-50/50 p-4 dark:bg-red-950/20 dark:border-red-900/30 shadow-2xs">
+                  <span className="text-[11px] font-semibold text-red-600 dark:text-red-400 uppercase tracking-wider block">Maintenance</span>
+                  <div className="flex items-baseline justify-between mt-1">
+                    <span className="text-2xl font-bold font-mono text-red-600 dark:text-red-300">
+                      {seats.filter(s => s.status === 'maintenance').length}
+                    </span>
+                    <span className="text-[10px] text-red-500 font-medium">Blocked</span>
+                  </div>
+                </div>
+
+                <div className="col-span-2 sm:col-span-4 lg:col-span-1 rounded-xl border border-slate-200 bg-white p-4 dark:bg-slate-900 dark:border-slate-800 shadow-2xs flex flex-col justify-between">
+                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Occupancy Rate</span>
+                  <div>
+                    <div className="flex items-baseline justify-between mb-1">
+                      <span className="text-base font-bold font-mono text-slate-800 dark:text-slate-200">
+                        {seats.length > 0 ? Math.round((seats.filter(s => s.status === 'occupied').length / seats.length) * 100) : 0}%
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="bg-indigo-600 h-1.5 rounded-full transition-all duration-500"
+                        style={{
+                          width: `${seats.length > 0 ? (seats.filter(s => s.status === 'occupied').length / seats.length) * 100 : 0}%`
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 
               {/* Floor/Room Selector Tabs */}
-              <div className="flex flex-wrap gap-2">
-                {rooms.map(rm => (
-                  <div key={rm.id} className="rounded-xl border border-indigo-100 bg-indigo-50/50 px-4 py-2.5 text-xs text-indigo-800 dark:border-indigo-900/30 dark:bg-indigo-950/20 dark:text-indigo-300">
-                    <span className="font-bold block">{rm.name}</span>
-                    <span className="text-[10px] text-slate-400 mt-0.5 block">
-                      {seats.filter(s => s.roomId === rm.id && s.status === 'available').length} Available seats
-                    </span>
-                  </div>
-                ))}
+              <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 pb-3 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setSelectedRoomId("all")}
+                  className={`rounded-xl px-4 py-2 text-xs font-semibold transition flex items-center gap-2 border ${
+                    selectedRoomId === "all"
+                      ? "border-indigo-600 bg-indigo-600 text-white shadow-xs"
+                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+                  }`}
+                >
+                  <Building2 className="h-3.5 w-3.5" />
+                  All Study Zones
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${selectedRoomId === "all" ? "bg-white/20 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500"}`}>
+                    {seats.length}
+                  </span>
+                </button>
+
+                {rooms.map(rm => {
+                  const roomSeats = seats.filter(s => s.roomId === rm.id);
+                  const availCount = roomSeats.filter(s => s.status === 'available').length;
+                  const isSelected = selectedRoomId === rm.id;
+                  return (
+                    <div
+                      key={rm.id}
+                      className={`group flex items-center rounded-xl border transition ${
+                        isSelected
+                          ? "border-indigo-600 bg-indigo-50 text-indigo-900 dark:bg-indigo-950/40 dark:border-indigo-500 dark:text-indigo-200"
+                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRoomId(rm.id)}
+                        className="px-3.5 py-2 text-xs font-semibold text-left flex items-center gap-2"
+                      >
+                        <span>{rm.name}</span>
+                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                          isSelected ? "bg-indigo-200/70 text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-200" : "bg-slate-100 text-slate-500 dark:bg-slate-800"
+                        }`}>
+                          {availCount}/{roomSeats.length} Free
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteRoom(rm.id, rm.name);
+                        }}
+                        title={`Delete ${rm.name}`}
+                        className="pr-2.5 text-slate-400 hover:text-red-500 opacity-60 hover:opacity-100 transition"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  );
+                })}
+
+                <button
+                  type="button"
+                  onClick={() => setIsAddRoomModalOpen(true)}
+                  className="rounded-xl border border-dashed border-slate-300 px-3 py-2 text-xs font-medium text-slate-500 hover:border-indigo-400 hover:text-indigo-600 dark:border-slate-700 dark:text-slate-400 transition flex items-center gap-1.5"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add Zone
+                </button>
               </div>
 
-              {/* Grid Layout map */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                
-                {/* Interactive seat grid */}
-                <div className="lg:col-span-2 rounded-xl border border-slate-200 bg-white p-6 dark:bg-slate-900 dark:border-slate-800">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-6 block">STUDY DESK GRID</span>
-                  
-                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
-                    {seats.map(st => {
-                      const assignedStud = students.find(s => s.id === st.assignedStudentId);
-                      return (
-                        <button
-                          key={st.id}
-                          onClick={() => setSelectedSeat(st)}
-                          className={`aspect-square rounded-xl p-2.5 flex flex-col justify-between items-center transition border ${
-                            st.status === "occupied"
-                              ? "bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-950/40 dark:border-indigo-900/40 dark:text-indigo-400"
-                              : st.status === "maintenance"
-                              ? "bg-red-50 border-red-100 text-red-600"
-                              : st.status === "reserved"
-                              ? "bg-amber-50 border-amber-100 text-amber-700"
-                              : "bg-slate-50 border-slate-200 hover:border-indigo-400 text-slate-700 dark:bg-slate-950 dark:border-slate-800 dark:text-slate-300"
-                          }`}
-                        >
-                          <span className="text-xs font-bold font-mono">{st.seatNumber}</span>
-                          <span className="text-[9px] uppercase font-semibold text-slate-400 tracking-wider">
-                            {st.type}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Legend */}
-                  <div className="mt-8 pt-4 border-t border-slate-100 dark:border-slate-800/60 flex flex-wrap gap-4 text-[10px] text-slate-500">
-                    <div className="flex items-center gap-1.5">
-                      <div className="h-3 w-3 bg-slate-50 border border-slate-200 rounded"></div>
-                      <span>Available</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="h-3 w-3 bg-indigo-50 border border-indigo-200 rounded"></div>
-                      <span>Occupied</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="h-3 w-3 bg-amber-50 border border-amber-100 rounded"></div>
-                      <span>Reserved</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="h-3 w-3 bg-red-50 border border-red-100 rounded"></div>
-                      <span>Maintenance</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Seat Detail Panel */}
-                <div className="rounded-xl border border-slate-200 bg-white p-5 dark:bg-slate-900 dark:border-slate-800 h-fit">
-                  {selectedSeat ? (
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-start border-b border-slate-100 pb-3 dark:border-slate-800">
-                        <div>
-                          <h3 className="font-display font-bold text-base text-slate-800 dark:text-slate-100">
-                            Seat Details
-                          </h3>
-                          <span className="font-mono text-xl font-bold text-indigo-600 block mt-1">
-                            {selectedSeat.seatNumber}
-                          </span>
-                        </div>
-                        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[9px] font-bold uppercase ${
-                          selectedSeat.status === 'available' ? 'bg-emerald-50 text-emerald-700' : 'bg-indigo-50 text-indigo-700'
-                        }`}>
-                          {selectedSeat.status}
-                        </span>
-                      </div>
-
-                      <div className="space-y-3 text-xs">
-                        <div>
-                          <span className="text-slate-400 block uppercase text-[10px]">Cubicle Type</span>
-                          <span className="font-semibold text-slate-700 dark:text-slate-300">{selectedSeat.type} Desk</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-400 block uppercase text-[10px]">Row Assignment</span>
-                          <span className="font-semibold text-slate-700 dark:text-slate-300">{selectedSeat.row}</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-400 block uppercase text-[10px]">Hardware &amp; Features</span>
-                          <span className="text-slate-500 leading-relaxed block">{selectedSeat.notes || "AC quiet study space."}</span>
-                        </div>
-                      </div>
-
-                      {/* Seat Occupant Info */}
-                      {selectedSeat.assignedStudentId ? (
-                        <div className="border-t border-slate-100 pt-4 dark:border-slate-800/80 space-y-3">
-                          <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider block">Currently Occupied By</span>
-                          {(() => {
-                            const occup = students.find(s => s.id === selectedSeat.assignedStudentId);
-                            if (!occup) return <p className="text-xs text-slate-400">Loading student details...</p>;
-                            const activeMemb = memberships.find(m => m.studentId === occup.id);
-                            return (
-                              <div className="space-y-3">
-                                <div className="flex items-center gap-2">
-                                  <img src={occup.photo} alt="" className="h-8 w-8 rounded-full object-cover" />
-                                  <div>
-                                    <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100">{occup.name}</h4>
-                                    <p className="text-[9px] text-slate-400 font-mono">ID: {occup.studentId} | {occup.phone}</p>
-                                  </div>
-                                </div>
-                                <div className="text-[11px] space-y-1 bg-slate-50 p-2.5 rounded-lg dark:bg-slate-950 dark:border dark:border-slate-800">
-                                  <p className="text-slate-500">Expiring: <strong className="text-red-500">{activeMemb?.endDate || "N/A"}</strong></p>
-                                  <p className="text-slate-500">Academic: <strong className="text-slate-700 dark:text-slate-300">{occup.college}</strong></p>
-                                </div>
-
-                                <div className="pt-2 flex flex-col gap-2">
-                                  <button
-                                    onClick={() => handleReleaseSeat(selectedSeat.id)}
-                                    className="w-full rounded-lg border border-slate-200 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
-                                  >
-                                    Vacate &amp; Release Seat
-                                  </button>
-
-                                  <form onSubmit={handleTransferSeat} className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
-                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Transfer Student Desk</span>
-                                    <select
-                                      required
-                                      value={transferTargetSeatId}
-                                      onChange={(e) => setTransferTargetSeatId(e.target.value)}
-                                      className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
-                                    >
-                                      <option value="">Select available seat...</option>
-                                      {seats.filter(s => s.status === 'available').map(s => (
-                                        <option key={s.id} value={s.id}>{s.seatNumber} ({s.type})</option>
-                                      ))}
-                                    </select>
-                                    <button
-                                      type="submit"
-                                      className="w-full rounded-lg bg-indigo-600 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 transition"
-                                    >
-                                      Complete Transfer
-                                    </button>
-                                  </form>
-                                </div>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      ) : (
-                        <div className="border-t border-slate-100 pt-4 dark:border-slate-800/80 space-y-3">
-                          <p className="text-xs text-slate-400">This seat is currently empty.</p>
-                          <button
-                            onClick={() => handleBlockSeat(selectedSeat.id)}
-                            className="w-full rounded-lg border border-red-100 py-1.5 text-xs font-semibold text-red-500 hover:bg-red-50 transition"
-                          >
-                            Block for Maintenance
-                          </button>
-                        </div>
-                      )}
-
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center text-center p-6 text-slate-400">
-                      <Info className="h-8 w-8 text-slate-300 mb-3" />
-                      <p className="text-xs font-medium">Click on any study cubicle in the grid to view details, assign students, vacate, or transfer desks.</p>
-                    </div>
+              {/* Filters & Search Toolbar */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200 dark:bg-slate-900/50 dark:border-slate-800">
+                <div className="relative flex-1 max-w-md">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <input
+                    type="text"
+                    value={seatSearchQuery}
+                    onChange={(e) => setSeatSearchQuery(e.target.value)}
+                    placeholder="Search by Desk No (e.g. D-01) or Student Name..."
+                    className="w-full pl-9 pr-4 py-1.5 text-xs bg-white border border-slate-200 rounded-lg dark:bg-slate-950 dark:border-slate-800 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                  />
+                  {seatSearchQuery && (
+                    <button
+                      onClick={() => setSeatSearchQuery("")}
+                      className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
                   )}
                 </div>
 
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1 bg-white dark:bg-slate-950 p-1 rounded-lg border border-slate-200 dark:border-slate-800 text-[11px]">
+                    <span className="text-slate-400 px-1 font-semibold">Status:</span>
+                    {(["all", "available", "occupied", "maintenance", "reserved"] as const).map(st => (
+                      <button
+                        key={st}
+                        type="button"
+                        onClick={() => setSeatStatusFilter(st)}
+                        className={`px-2 py-0.5 rounded capitalize font-medium transition ${
+                          seatStatusFilter === st
+                            ? "bg-indigo-600 text-white shadow-2xs font-semibold"
+                            : "text-slate-600 hover:text-slate-900 dark:text-slate-400"
+                        }`}
+                      >
+                        {st}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-1 bg-white dark:bg-slate-950 p-1 rounded-lg border border-slate-200 dark:border-slate-800 text-[11px]">
+                    <span className="text-slate-400 px-1 font-semibold">Type:</span>
+                    {(["all", "AC", "Non-AC", "Premium", "Window"] as const).map(tp => (
+                      <button
+                        key={tp}
+                        type="button"
+                        onClick={() => setSeatTypeFilter(tp)}
+                        className={`px-2 py-0.5 rounded font-medium transition ${
+                          seatTypeFilter === tp
+                            ? "bg-slate-800 text-white dark:bg-slate-700 shadow-2xs font-semibold"
+                            : "text-slate-600 hover:text-slate-900 dark:text-slate-400"
+                        }`}
+                      >
+                        {tp}
+                      </button>
+                    ))}
+                  </div>
+
+                  {(seatSearchQuery || seatStatusFilter !== "all" || seatTypeFilter !== "all" || selectedRoomId !== "all") && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSeatSearchQuery("");
+                        setSeatStatusFilter("all");
+                        setSeatTypeFilter("all");
+                        setSelectedRoomId("all");
+                      }}
+                      className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-700 px-2 py-1"
+                    >
+                      Clear Filters
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {/* Grid Layout map */}
+              {(() => {
+                const filteredSeats = seats.filter(st => {
+                  if (selectedRoomId !== "all" && st.roomId !== selectedRoomId) return false;
+                  if (seatStatusFilter !== "all" && st.status !== seatStatusFilter) return false;
+                  if (seatTypeFilter !== "all" && st.type !== seatTypeFilter) return false;
+                  if (seatSearchQuery.trim()) {
+                    const q = seatSearchQuery.toLowerCase();
+                    const numMatch = st.seatNumber.toLowerCase().includes(q);
+                    const occup = students.find(s => s.id === st.assignedStudentId);
+                    const nameMatch = occup && occup.name.toLowerCase().includes(q);
+                    const idMatch = occup && occup.studentId.toLowerCase().includes(q);
+                    return numMatch || nameMatch || idMatch;
+                  }
+                  return true;
+                });
+
+                return (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Interactive seat grid */}
+                    <div className="lg:col-span-2 rounded-xl border border-slate-200 bg-white p-6 dark:bg-slate-900 dark:border-slate-800 flex flex-col justify-between min-h-[420px]">
+                      <div>
+                        <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100 dark:border-slate-800">
+                          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+                            <Grid className="h-3.5 w-3.5 text-indigo-600" />
+                            Study Desk Matrix ({filteredSeats.length} displayed)
+                          </span>
+                          <span className="text-xs text-slate-400 font-medium">Click any desk for actions</span>
+                        </div>
+
+                        {/* If 0 seats in the whole system */}
+                        {seats.length === 0 ? (
+                          <div className="py-12 px-4 flex flex-col items-center justify-center text-center">
+                            <div className="h-16 w-16 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/30 flex items-center justify-center mb-4 shadow-sm">
+                              <Grid className="h-8 w-8 text-indigo-600" />
+                            </div>
+                            <h3 className="font-display text-base font-bold text-slate-800 dark:text-slate-100">
+                              Your Study Zone Layout is Empty
+                            </h3>
+                            <p className="text-xs text-slate-500 max-w-md mt-1 mb-6 leading-relaxed">
+                              No study desks or halls are configured yet. Initialize a standard 24-seat layout instantly, or design custom zones and numbered cubicles.
+                            </p>
+                            <div className="flex flex-wrap items-center justify-center gap-3">
+                              <button
+                                type="button"
+                                disabled={isQuickSetupLoading}
+                                onClick={handleQuickSetupLayout}
+                                className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700 shadow-sm transition disabled:opacity-50"
+                              >
+                                <Zap className="h-4 w-4 text-amber-300" />
+                                {isQuickSetupLoading ? "Initializing 24 Desks..." : "Quick Initialize (24-Desk Hall)"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setIsAddRoomModalOpen(true)}
+                                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200 transition"
+                              >
+                                <Plus className="h-4 w-4" />
+                                Create Custom Zone
+                              </button>
+                            </div>
+                          </div>
+                        ) : filteredSeats.length === 0 ? (
+                          <div className="py-12 text-center text-slate-400">
+                            <Filter className="h-8 w-8 text-slate-300 mx-auto mb-2" />
+                            <p className="text-xs font-medium text-slate-600 dark:text-slate-300">No desks match your filter criteria.</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSeatSearchQuery("");
+                                setSeatStatusFilter("all");
+                                setSeatTypeFilter("all");
+                                setSelectedRoomId("all");
+                              }}
+                              className="mt-3 text-xs font-semibold text-indigo-600 hover:underline"
+                            >
+                              Reset Filters
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                            {filteredSeats.map(st => {
+                              const assignedStud = students.find(s => s.id === st.assignedStudentId);
+                              const isSelected = selectedSeat?.id === st.id;
+                              return (
+                                <button
+                                  key={st.id}
+                                  type="button"
+                                  onClick={() => setSelectedSeat(st)}
+                                  className={`aspect-square rounded-xl p-2.5 flex flex-col justify-between items-center transition relative text-left border ${
+                                    isSelected
+                                      ? "ring-2 ring-indigo-600 ring-offset-2 dark:ring-offset-slate-900"
+                                      : ""
+                                  } ${
+                                    st.status === "occupied"
+                                      ? "bg-indigo-50/90 border-indigo-200 text-indigo-900 dark:bg-indigo-950/40 dark:border-indigo-900/60 dark:text-indigo-200 shadow-2xs"
+                                      : st.status === "maintenance"
+                                      ? "bg-red-50 border-red-200 text-red-700 dark:bg-red-950/30 dark:border-red-900/40 dark:text-red-300"
+                                      : st.status === "reserved"
+                                      ? "bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950/30 dark:border-amber-900/40 dark:text-amber-300"
+                                      : "bg-slate-50/80 border-slate-200 hover:border-indigo-300 text-slate-700 dark:bg-slate-950 dark:border-slate-800 dark:text-slate-300"
+                                  }`}
+                                >
+                                  {/* Top header inside desk card */}
+                                  <div className="w-full flex justify-between items-center">
+                                    <span className="text-[11px] font-bold font-mono tracking-tight">{st.seatNumber}</span>
+                                    <span className={`text-[8px] uppercase font-bold px-1 py-0.2 rounded ${
+                                      st.type === 'AC' ? 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300' :
+                                      st.type === 'Premium' ? 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300' :
+                                      st.type === 'Window' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' :
+                                      'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-400'
+                                    }`}>
+                                      {st.type}
+                                    </span>
+                                  </div>
+
+                                  {/* Middle Content */}
+                                  <div className="my-auto text-center w-full truncate px-0.5">
+                                    {st.status === "occupied" && assignedStud ? (
+                                      <div className="flex flex-col items-center">
+                                        <div className="h-5 w-5 rounded-full bg-indigo-200 text-indigo-800 text-[9px] font-bold flex items-center justify-center overflow-hidden mb-0.5">
+                                          {assignedStud.photo ? (
+                                            <img src={assignedStud.photo} alt="" className="h-full w-full object-cover" />
+                                          ) : (
+                                            assignedStud.name.charAt(0)
+                                          )}
+                                        </div>
+                                        <span className="text-[10px] font-semibold truncate block w-full text-center">
+                                          {assignedStud.name.split(" ")[0]}
+                                        </span>
+                                      </div>
+                                    ) : st.status === "maintenance" ? (
+                                      <div className="flex flex-col items-center text-red-500">
+                                        <Wrench className="h-4 w-4 mb-0.5" />
+                                        <span className="text-[9px] font-medium uppercase tracking-tight">Repair</span>
+                                      </div>
+                                    ) : st.status === "reserved" ? (
+                                      <div className="text-center text-amber-600 text-[10px] font-semibold">
+                                        Reserved
+                                      </div>
+                                    ) : (
+                                      <div className="flex flex-col items-center text-emerald-600 dark:text-emerald-400">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 mb-1"></span>
+                                        <span className="text-[10px] font-medium">Available</span>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Bottom row identifier */}
+                                  <div className="w-full text-[9px] text-slate-400 flex justify-between items-center pt-0.5 border-t border-slate-100/60 dark:border-slate-800/60">
+                                    <span>{st.row || "Desk"}</span>
+                                    {st.status === "occupied" && (
+                                      <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Legend */}
+                      <div className="mt-8 pt-4 border-t border-slate-100 dark:border-slate-800/60 flex flex-wrap items-center justify-between gap-4 text-[11px] text-slate-500">
+                        <div className="flex flex-wrap items-center gap-4">
+                          <div className="flex items-center gap-1.5">
+                            <div className="h-3 w-3 bg-slate-50 border border-slate-300 rounded"></div>
+                            <span>Available</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <div className="h-3 w-3 bg-indigo-100 border border-indigo-300 rounded"></div>
+                            <span>Occupied</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <div className="h-3 w-3 bg-amber-100 border border-amber-300 rounded"></div>
+                            <span>Reserved</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <div className="h-3 w-3 bg-red-100 border border-red-300 rounded"></div>
+                            <span>Maintenance</span>
+                          </div>
+                        </div>
+
+                        {seats.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleQuickSetupLayout}
+                            disabled={isQuickSetupLoading}
+                            className="text-[10px] text-slate-400 hover:text-indigo-600 transition flex items-center gap-1"
+                          >
+                            <Zap className="h-3 w-3" /> Quick Add Hall
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Seat Detail Inspector Panel */}
+                    <div className="rounded-xl border border-slate-200 bg-white p-5 dark:bg-slate-900 dark:border-slate-800 h-fit shadow-2xs">
+                      {selectedSeat ? (
+                        <div className="space-y-4">
+                          <div className="flex justify-between items-start border-b border-slate-100 pb-3 dark:border-slate-800">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h3 className="font-display font-bold text-base text-slate-800 dark:text-slate-100">
+                                  Desk Details
+                                </h3>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditSeatForm({
+                                      id: selectedSeat.id,
+                                      seatNumber: selectedSeat.seatNumber,
+                                      type: selectedSeat.type,
+                                      row: selectedSeat.row || "Row A",
+                                      notes: selectedSeat.notes || "",
+                                      status: selectedSeat.status
+                                    });
+                                    setIsEditSeatModalOpen(true);
+                                  }}
+                                  title="Edit Desk Details"
+                                  className="p-1 rounded text-slate-400 hover:text-indigo-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                                >
+                                  <Edit className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteSeat(selectedSeat.id, selectedSeat.seatNumber)}
+                                  title="Delete Desk"
+                                  className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                              <span className="font-mono text-2xl font-bold text-indigo-600 block mt-0.5">
+                                {selectedSeat.seatNumber}
+                              </span>
+                            </div>
+                            <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[9px] font-bold uppercase ${
+                              selectedSeat.status === 'available'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : selectedSeat.status === 'occupied'
+                                ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                : selectedSeat.status === 'maintenance'
+                                ? 'bg-red-50 text-red-700 border border-red-200'
+                                : 'bg-amber-50 text-amber-700 border border-amber-200'
+                            }`}>
+                              {selectedSeat.status}
+                            </span>
+                          </div>
+
+                          <div className="space-y-2.5 text-xs bg-slate-50/70 p-3 rounded-lg border border-slate-100 dark:bg-slate-950 dark:border-slate-800">
+                            <div className="flex justify-between">
+                              <span className="text-slate-400 uppercase text-[10px] font-semibold">Study Zone</span>
+                              <span className="font-semibold text-slate-700 dark:text-slate-300">
+                                {rooms.find(r => r.id === selectedSeat.roomId)?.name || "Main Hall"}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-400 uppercase text-[10px] font-semibold">Desk Category</span>
+                              <span className="font-semibold text-slate-700 dark:text-slate-300">{selectedSeat.type} Cubicle</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-400 uppercase text-[10px] font-semibold">Row Alignment</span>
+                              <span className="font-semibold text-slate-700 dark:text-slate-300">{selectedSeat.row || "Row A"}</span>
+                            </div>
+                            <div className="pt-1.5 border-t border-slate-200/60 dark:border-slate-800">
+                              <span className="text-slate-400 block uppercase text-[10px] font-semibold mb-0.5">Features &amp; Notes</span>
+                              <span className="text-slate-600 dark:text-slate-400 leading-relaxed block text-[11px]">
+                                {selectedSeat.notes || "Quiet silent zone desk with dedicated power socket."}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Seat Occupant Info */}
+                          {selectedSeat.assignedStudentId ? (
+                            <div className="border-t border-slate-100 pt-4 dark:border-slate-800/80 space-y-3">
+                              <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider block">
+                                Currently Assigned Student
+                              </span>
+                              {(() => {
+                                const occup = students.find(s => s.id === selectedSeat.assignedStudentId);
+                                if (!occup) return <p className="text-xs text-slate-400">Student profile not found.</p>;
+                                const activeMemb = memberships.find(m => m.studentId === occup.id);
+                                return (
+                                  <div className="space-y-3">
+                                    <div className="flex items-center gap-2.5 bg-indigo-50/50 p-2.5 rounded-lg border border-indigo-100 dark:bg-indigo-950/20 dark:border-indigo-900/30">
+                                      <img src={occup.photo} alt="" className="h-9 w-9 rounded-full object-cover border border-indigo-200" />
+                                      <div className="min-w-0 flex-1">
+                                        <h4 className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate">{occup.name}</h4>
+                                        <p className="text-[10px] text-slate-400 font-mono">ID: {occup.studentId} • {occup.phone}</p>
+                                      </div>
+                                    </div>
+                                    <div className="text-[11px] space-y-1 bg-slate-50 p-2.5 rounded-lg dark:bg-slate-950 dark:border dark:border-slate-800">
+                                      <p className="text-slate-500">Plan Expiry: <strong className="text-red-500">{activeMemb?.endDate || "No Active Plan"}</strong></p>
+                                      <p className="text-slate-500 truncate">Institution: <strong className="text-slate-700 dark:text-slate-300">{occup.college || "Self Prep"}</strong></p>
+                                    </div>
+
+                                    <div className="pt-2 flex flex-col gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleReleaseSeat(selectedSeat.id)}
+                                        className="w-full rounded-lg border border-slate-200 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 transition"
+                                      >
+                                        Vacate &amp; Release Seat
+                                      </button>
+
+                                      <form onSubmit={handleTransferSeat} className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Transfer Student Desk</span>
+                                        <select
+                                          required
+                                          value={transferTargetSeatId}
+                                          onChange={(e) => setTransferTargetSeatId(e.target.value)}
+                                          className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+                                        >
+                                          <option value="">Select target available desk...</option>
+                                          {seats.filter(s => s.status === 'available' && s.id !== selectedSeat.id).map(s => (
+                                            <option key={s.id} value={s.id}>{s.seatNumber} ({s.type} - {rooms.find(r => r.id === s.roomId)?.name || "Hall"})</option>
+                                          ))}
+                                        </select>
+                                        <button
+                                          type="submit"
+                                          className="w-full rounded-lg bg-indigo-600 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 transition flex items-center justify-center gap-1.5"
+                                        >
+                                          <ArrowRightLeft className="h-3.5 w-3.5" />
+                                          Transfer Student
+                                        </button>
+                                      </form>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          ) : selectedSeat.status === "maintenance" ? (
+                            <div className="border-t border-slate-100 pt-4 dark:border-slate-800/80 space-y-3">
+                              <p className="text-xs text-red-500 font-medium">This desk is currently blocked for maintenance.</p>
+                              <button
+                                type="button"
+                                onClick={() => handleUnblockSeat(selectedSeat.id)}
+                                className="w-full rounded-lg bg-emerald-600 py-2 text-xs font-semibold text-white hover:bg-emerald-700 transition"
+                              >
+                                ✅ Restore &amp; Mark Available
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="border-t border-slate-100 pt-4 dark:border-slate-800/80 space-y-2.5">
+                              <p className="text-xs text-slate-500">This desk is currently empty &amp; ready for assignment.</p>
+                              
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setAssignStudentId("");
+                                  setIsAssignSeatModalOpen(true);
+                                }}
+                                className="w-full rounded-lg bg-indigo-600 py-2 text-xs font-semibold text-white hover:bg-indigo-700 transition flex items-center justify-center gap-1.5"
+                              >
+                                <UserPlus className="h-3.5 w-3.5" />
+                                Assign to Enrolled Student
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleBlockSeat(selectedSeat.id)}
+                                className="w-full rounded-lg border border-red-200 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 dark:border-red-900/40 dark:hover:bg-red-950/30 transition"
+                              >
+                                🔧 Block for Maintenance
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center text-center p-6 text-slate-400">
+                          <Info className="h-8 w-8 text-slate-300 mb-3" />
+                          <p className="text-xs font-medium">Click on any study cubicle in the grid to view details, assign students, vacate, or transfer desks.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -3458,9 +4579,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   try {
                     const res = await apiCall(`/api/organizations/${organization.id}`, "PUT", organization);
                     setOrganization(res);
-                    alert("Reading room settings updated successfully!");
+                    Swal.fire({
+                      icon: "success",
+                      title: "Settings Updated",
+                      text: "Reading room settings updated successfully!",
+                      timer: 1800,
+                      showConfirmButton: false,
+                      background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+                      color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+                    });
                   } catch (err: any) {
-                    alert(err.message);
+                    Swal.fire({
+                      icon: "error",
+                      title: "Update Failed",
+                      text: err.message,
+                      background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+                      color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+                    });
                   }
                 }} className="space-y-4 text-xs">
                   
@@ -3689,7 +4824,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           )}
 
-          {activeTab === "whatsapp" && (
+          {activeTab === "whatsapp" && currentUser.role !== "RECEPTIONIST" && (
             <div className="space-y-6 animate-fade-in text-xs">
               <div className="border-b border-slate-100 pb-4 dark:border-slate-800">
                 <h2 className="font-display font-bold text-xl text-slate-900 dark:text-white">WhatsApp &amp; Subscription Renewal Center</h2>
@@ -4331,6 +5466,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
                   />
                 </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Enrollment Status</label>
+                  <select
+                    value={studentForm.status}
+                    onChange={(e) => setStudentForm({ ...studentForm, status: e.target.value as any })}
+                    className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950 font-semibold text-slate-800 dark:text-slate-200"
+                  >
+                    <option value="active">Active (Enrolled)</option>
+                    <option value="inactive">Inactive / Archived</option>
+                    <option value="suspended">Suspended</option>
+                  </select>
+                </div>
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
@@ -4378,8 +5525,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950 disabled:opacity-75"
                   >
                     <option value="">Choose student...</option>
-                    {students.filter(s => s.status !== "inactive").map(s => (
-                      <option key={s.id} value={s.id}>{s.name} ({s.studentId})</option>
+                    {students.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.studentId}) {s.status !== "active" ? `[${s.status.toUpperCase()}]` : ""}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -4705,7 +5854,459 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
-      {/* Invoice &amp; Receipt Modal */}
+      {/* Modal: Add Study Zone / Room */}
+      {isAddRoomModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between border-b border-slate-100 p-4 dark:border-slate-800">
+              <h3 className="font-display text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                <Building2 className="h-4 w-4 text-indigo-600" />
+                Create New Study Zone
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsAddRoomModalOpen(false)}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleCreateRoom} className="p-5 space-y-4 text-xs">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Zone / Room Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={roomNameInput}
+                  onChange={(e) => setRoomNameInput(e.target.value)}
+                  placeholder="e.g. Quiet Zone A, Silent Hall 2, Premium Lounge"
+                  className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsAddRoomModalOpen(false)}
+                  className="rounded-lg border border-slate-200 px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition"
+                >
+                  Create Study Zone
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Add Single Desk */}
+      {isAddSeatModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between border-b border-slate-100 p-4 dark:border-slate-800">
+              <h3 className="font-display text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                <Plus className="h-4 w-4 text-indigo-600" />
+                Add Study Desk
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsAddSeatModalOpen(false)}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleCreateSingleSeat} className="p-5 space-y-4 text-xs">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Study Zone / Room *</label>
+                <select
+                  required
+                  value={seatForm.roomId || (rooms[0]?.id || "")}
+                  onChange={(e) => setSeatForm({ ...seatForm, roomId: e.target.value })}
+                  className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+                >
+                  {rooms.length === 0 && <option value="">Auto-create Default Study Hall</option>}
+                  {rooms.map(rm => (
+                    <option key={rm.id} value={rm.id}>{rm.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Desk Number *</label>
+                  <input
+                    type="text"
+                    required
+                    value={seatForm.seatNumber}
+                    onChange={(e) => setSeatForm({ ...seatForm, seatNumber: e.target.value })}
+                    placeholder="e.g. D-01"
+                    className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-mono bg-slate-50 dark:border-slate-800 dark:bg-slate-950 uppercase"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Desk Type</label>
+                  <select
+                    value={seatForm.type}
+                    onChange={(e) => setSeatForm({ ...seatForm, type: e.target.value as any })}
+                    className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+                  >
+                    <option value="AC">AC Zone</option>
+                    <option value="Non-AC">Non-AC</option>
+                    <option value="Premium">Premium Cabin</option>
+                    <option value="Window">Window View</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Row Alignment</label>
+                <input
+                  type="text"
+                  value={seatForm.row}
+                  onChange={(e) => setSeatForm({ ...seatForm, row: e.target.value })}
+                  placeholder="e.g. Row A, Left Wing"
+                  className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Features / Notes</label>
+                <textarea
+                  rows={2}
+                  value={seatForm.notes}
+                  onChange={(e) => setSeatForm({ ...seatForm, notes: e.target.value })}
+                  placeholder="e.g. Dedicated charging plug, reading light, ergonomic cushion"
+                  className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsAddSeatModalOpen(false)}
+                  className="rounded-lg border border-slate-200 px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition"
+                >
+                  Create Desk
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Batch Generate Desks */}
+      {isBatchSeatModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-lg overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between border-b border-slate-100 p-4 dark:border-slate-800">
+              <h3 className="font-display text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                <Zap className="h-4 w-4 text-amber-500" />
+                Batch Desk Generator
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsBatchSeatModalOpen(false)}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleBatchCreateSeats} className="p-5 space-y-4 text-xs">
+              <p className="text-slate-500 text-[11px] leading-relaxed">
+                Quickly generate a sequence of numbered desks (e.g. D-01 through D-24) mapped directly to your study hall.
+              </p>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Target Study Zone *</label>
+                <select
+                  required
+                  value={batchSeatForm.roomId || (rooms[0]?.id || "")}
+                  onChange={(e) => setBatchSeatForm({ ...batchSeatForm, roomId: e.target.value })}
+                  className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+                >
+                  {rooms.length === 0 && <option value="">Auto-create Default Study Hall</option>}
+                  {rooms.map(rm => (
+                    <option key={rm.id} value={rm.id}>{rm.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Prefix</label>
+                  <input
+                    type="text"
+                    value={batchSeatForm.prefix}
+                    onChange={(e) => setBatchSeatForm({ ...batchSeatForm, prefix: e.target.value })}
+                    placeholder="D-"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-mono bg-slate-50 dark:border-slate-800 dark:bg-slate-950 uppercase"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Start No.</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={batchSeatForm.startNumber}
+                    onChange={(e) => setBatchSeatForm({ ...batchSeatForm, startNumber: Number(e.target.value) })}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-mono bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Total Desks</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={batchSeatForm.count}
+                    onChange={(e) => setBatchSeatForm({ ...batchSeatForm, count: Number(e.target.value) })}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs font-mono bg-slate-50 dark:border-slate-800 dark:bg-slate-950 font-bold text-indigo-600"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Desk Type</label>
+                  <select
+                    value={batchSeatForm.type}
+                    onChange={(e) => setBatchSeatForm({ ...batchSeatForm, type: e.target.value as any })}
+                    className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+                  >
+                    <option value="AC">AC Zone</option>
+                    <option value="Non-AC">Non-AC</option>
+                    <option value="Premium">Premium Cabin</option>
+                    <option value="Window">Window View</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Row Alignment</label>
+                  <input
+                    type="text"
+                    value={batchSeatForm.row}
+                    onChange={(e) => setBatchSeatForm({ ...batchSeatForm, row: e.target.value })}
+                    placeholder="Row A"
+                    className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Features / Notes</label>
+                <textarea
+                  rows={2}
+                  value={batchSeatForm.notes}
+                  onChange={(e) => setBatchSeatForm({ ...batchSeatForm, notes: e.target.value })}
+                  placeholder="Features included with these desks..."
+                  className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+                />
+              </div>
+
+              <div className="bg-indigo-50 dark:bg-indigo-950/30 p-2.5 rounded-lg border border-indigo-100 dark:border-indigo-900/30 text-[11px] text-indigo-800 dark:text-indigo-300">
+                Preview: Will generate desks from <strong className="font-mono">{batchSeatForm.prefix}{String(batchSeatForm.startNumber).padStart(2, '0')}</strong> to <strong className="font-mono">{batchSeatForm.prefix}{String(batchSeatForm.startNumber + Number(batchSeatForm.count) - 1).padStart(2, '0')}</strong> ({batchSeatForm.count} desks).
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsBatchSeatModalOpen(false)}
+                  className="rounded-lg border border-slate-200 px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-indigo-600 px-5 py-2 font-semibold text-white hover:bg-indigo-700 transition flex items-center gap-1.5"
+                >
+                  <Zap className="h-3.5 w-3.5 text-amber-300" />
+                  Generate {batchSeatForm.count} Desks
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Assign Student to Desk */}
+      {isAssignSeatModalOpen && selectedSeat && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between border-b border-slate-100 p-4 dark:border-slate-800">
+              <div>
+                <h3 className="font-display text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                  <UserPlus className="h-4 w-4 text-indigo-600" />
+                  Assign Desk {selectedSeat.seatNumber}
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Allocate this {selectedSeat.type} desk to an enrolled student.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAssignSeatModalOpen(false)}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleAssignStudentToSeat} className="p-5 space-y-4 text-xs">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Select Student *</label>
+                <select
+                  required
+                  value={assignStudentId}
+                  onChange={(e) => setAssignStudentId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 px-3.5 py-2.5 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950 font-medium"
+                >
+                  <option value="">Select an enrolled student...</option>
+                  {students.filter(s => s.status === 'active').map(s => {
+                    const existingSeat = seats.find(st => st.assignedStudentId === s.id);
+                    return (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.studentId}) {existingSeat ? `[Already on ${existingSeat.seatNumber}]` : "[No Desk]"}
+                      </option>
+                    );
+                  })}
+                </select>
+                {students.filter(s => s.status === 'active').length === 0 && (
+                  <p className="text-[11px] text-amber-600 mt-1">
+                    No active students enrolled yet. Add students in the Students tab first.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsAssignSeatModalOpen(false)}
+                  className="rounded-lg border border-slate-200 px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!assignStudentId}
+                  className="rounded-lg bg-indigo-600 px-5 py-2 font-semibold text-white hover:bg-indigo-700 transition disabled:opacity-50"
+                >
+                  Confirm Allocation
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Desk */}
+      {isEditSeatModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between border-b border-slate-100 p-4 dark:border-slate-800">
+              <h3 className="font-display text-base font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                <Edit className="h-4 w-4 text-indigo-600" />
+                Edit Desk {editSeatForm.seatNumber}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsEditSeatModalOpen(false)}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleEditSeatSubmit} className="p-5 space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Desk Number *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editSeatForm.seatNumber}
+                    onChange={(e) => setEditSeatForm({ ...editSeatForm, seatNumber: e.target.value })}
+                    className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-mono bg-slate-50 dark:border-slate-800 dark:bg-slate-950 uppercase"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Status</label>
+                  <select
+                    value={editSeatForm.status}
+                    onChange={(e) => setEditSeatForm({ ...editSeatForm, status: e.target.value as any })}
+                    className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+                  >
+                    <option value="available">Available</option>
+                    <option value="occupied">Occupied</option>
+                    <option value="maintenance">Maintenance</option>
+                    <option value="reserved">Reserved</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Desk Type</label>
+                  <select
+                    value={editSeatForm.type}
+                    onChange={(e) => setEditSeatForm({ ...editSeatForm, type: e.target.value as any })}
+                    className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+                  >
+                    <option value="AC">AC Zone</option>
+                    <option value="Non-AC">Non-AC</option>
+                    <option value="Premium">Premium Cabin</option>
+                    <option value="Window">Window View</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Row Alignment</label>
+                  <input
+                    type="text"
+                    value={editSeatForm.row}
+                    onChange={(e) => setEditSeatForm({ ...editSeatForm, row: e.target.value })}
+                    className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Features / Notes</label>
+                <textarea
+                  rows={2}
+                  value={editSeatForm.notes}
+                  onChange={(e) => setEditSeatForm({ ...editSeatForm, notes: e.target.value })}
+                  className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsEditSeatModalOpen(false)}
+                  className="rounded-lg border border-slate-200 px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Invoice & Receipt Modal */}
       <ReceiptModal
         isOpen={isReceiptOpen}
         onClose={() => setIsReceiptOpen(false)}

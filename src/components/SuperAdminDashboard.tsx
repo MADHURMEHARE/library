@@ -122,7 +122,13 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const handleCreateOrg = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!orgName || !orgEmail || !orgAdminEmail || !orgAdminName) {
-      alert("Please fill in all mandatory fields.");
+      Swal.fire({
+        icon: "warning",
+        title: "Missing Information",
+        text: "Please fill in all mandatory fields.",
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
       return;
     }
 
@@ -148,10 +154,26 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       setOrgAdminEmail("");
       setIsOrgModalOpen(false);
 
+      Swal.fire({
+        icon: "success",
+        title: "Organization Registered",
+        text: "New reading room organization created successfully.",
+        timer: 2000,
+        showConfirmButton: false,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+
       // Refresh
       fetchData();
     } catch (err: any) {
-      alert(err.message || "Failed to create organization.");
+      Swal.fire({
+        icon: "error",
+        title: "Registration Failed",
+        text: err.message || "Failed to create organization.",
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
     } finally {
       setSubmittingOrg(false);
     }
@@ -172,9 +194,26 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       setAnnTitle("");
       setAnnContent("");
       setIsAnnModalOpen(false);
+      
+      Swal.fire({
+        icon: "success",
+        title: "Broadcast Published",
+        text: "System-wide announcement posted successfully.",
+        timer: 1500,
+        showConfirmButton: false,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+
       fetchData();
     } catch (err: any) {
-      alert(err.message || "Failed to create announcement.");
+      Swal.fire({
+        icon: "error",
+        title: "Publication Error",
+        text: err.message || "Failed to create announcement.",
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
     } finally {
       setSubmittingAnn(false);
     }

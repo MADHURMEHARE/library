@@ -1,5 +1,8 @@
 import fs from "fs";
 import path from "path";
+import { getMongoDb, initializeMongoIndexes } from "./db/mongo";
+import { COLLECTION_NAMES, CollectionName } from "./db/schema";
+import { runMigration } from "./db/migrate";
 import {
   Organization,
   User,
@@ -22,272 +25,347 @@ import {
   WhatsAppLog
 } from "../src/types";
 
-const DB_FILE = path.join(process.cwd(), "db.json");
+const DATA_DIR = path.join(process.cwd(), "data");
+const LEGACY_DB_FILE = path.join(process.cwd(), "db.json");
 
-interface DBStructure {
-  organizations: Organization[];
-  users: User[];
-  students: Student[];
-  membershipPlans: MembershipPlan[];
-  memberships: Membership[];
-  buildings: Building[];
-  floors: Floor[];
-  rooms: Room[];
-  seats: Seat[];
-  seatHistory: SeatAssignmentHistory[];
-  attendances: Attendance[];
-  payments: Payment[];
-  invoices: Invoice[];
-  notifications: Notification[];
-  auditLogs: AuditLog[];
-  announcements: Announcement[];
-  expenses: Expense[];
-  whatsappConfigs: WhatsAppConfig[];
-  whatsappLogs: WhatsAppLog[];
-}
+/**
+ * Multi-Tenant Collection Repository Store
+ * Each entity resides in its own discrete Collection / File, completely eliminating monolithic giant document storage.
+ */
+class CollectionRepository<T extends { id: string; organizationId?: string | null; orgId?: string | null }> {
+  private collectionName: string;
+  private memoryCache: T[] = [];
+  private isLoaded = false;
 
-const DEFAULT_DB: DBStructure = {
-  organizations: [],
-  users: [],
-  students: [],
-  membershipPlans: [],
-  memberships: [],
-  buildings: [],
-  floors: [],
-  rooms: [],
-  seats: [],
-  seatHistory: [],
-  attendances: [],
-  payments: [],
-  invoices: [],
-  notifications: [],
-  auditLogs: [],
-  announcements: [],
-  expenses: [],
-  whatsappConfigs: [],
-  whatsappLogs: []
-};
+  constructor(collectionName: string) {
+    this.collectionName = collectionName;
+  }
 
-class DBStore {
-  private data: DBStructure = { ...DEFAULT_DB };
+  private getFilePath(): string {
+    return path.join(DATA_DIR, `${this.collectionName}.json`);
+  }
 
-  public async initialize(): Promise<void> {
+  public load(): void {
     try {
-      if (fs.existsSync(DB_FILE)) {
-        const content = fs.readFileSync(DB_FILE, "utf-8");
-        const parsed = JSON.parse(content);
-        this.data = {
-          organizations: parsed.organizations || [],
-          users: parsed.users || [],
-          students: parsed.students || [],
-          membershipPlans: parsed.membershipPlans || [],
-          memberships: parsed.memberships || [],
-          buildings: parsed.buildings || [],
-          floors: parsed.floors || [],
-          rooms: parsed.rooms || [],
-          seats: parsed.seats || [],
-          seatHistory: parsed.seatHistory || [],
-          attendances: parsed.attendances || [],
-          payments: parsed.payments || [],
-          invoices: parsed.invoices || [],
-          notifications: parsed.notifications || [],
-          auditLogs: parsed.auditLogs || [],
-          announcements: parsed.announcements || [],
-          expenses: parsed.expenses || [],
-          whatsappConfigs: parsed.whatsappConfigs || [],
-          whatsappLogs: parsed.whatsappLogs || []
-        };
-      } else {
-        this.save();
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
       }
+
+      const filePath = this.getFilePath();
+      if (fs.existsSync(filePath)) {
+        const content = fs.readFileSync(filePath, "utf-8");
+        this.memoryCache = JSON.parse(content);
+      } else {
+        this.memoryCache = [];
+        this.persist();
+      }
+      this.isLoaded = true;
     } catch (error) {
-      console.error("Failed to initialize database store:", error);
-      this.data = { ...DEFAULT_DB };
+      console.error(`Failed to load discrete collection ${this.collectionName}:`, error);
+      this.memoryCache = [];
     }
   }
 
-  private save(): void {
+  private persist(): void {
     try {
-      fs.writeFileSync(DB_FILE, JSON.stringify(this.data, null, 2), "utf-8");
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+      const filePath = this.getFilePath();
+      fs.writeFileSync(filePath, JSON.stringify(this.memoryCache, null, 2), "utf-8");
     } catch (error) {
-      console.error("Failed to save database state:", error);
+      console.error(`Failed to persist collection ${this.collectionName}:`, error);
+    }
+  }
+
+  // Dual sync to live MongoDB if available
+  private async syncMongo(doc: T, operation: "upsert" | "delete"): Promise<void> {
+    try {
+      const db = await getMongoDb();
+      if (!db) return;
+      const col = db.collection(this.collectionName);
+      if (operation === "upsert") {
+        const { _id, ...docWithoutId } = doc as any;
+        await col.updateOne({ id: doc.id }, { $set: docWithoutId }, { upsert: true });
+      } else if (operation === "delete") {
+        await col.deleteOne({ id: doc.id });
+      }
+    } catch (err) {
+      console.warn(`[MongoDB Sync] Warning on collection ${this.collectionName}:`, (err as Error).message);
+    }
+  }
+
+  public getAll(): T[] {
+    if (!this.isLoaded) this.load();
+    return [...this.memoryCache];
+  }
+
+  public findByOrg(orgId: string): T[] {
+    if (!this.isLoaded) this.load();
+    return this.memoryCache.filter(item => {
+      const itemOrg = item.organizationId ?? item.orgId;
+      return itemOrg === orgId;
+    });
+  }
+
+  public findById(id: string): T | undefined {
+    if (!this.isLoaded) this.load();
+    return this.memoryCache.find(item => item.id === id);
+  }
+
+  public insert(doc: T): void {
+    if (!this.isLoaded) this.load();
+    // Ensure both organizationId and orgId are set for backwards compatibility
+    if (doc.orgId && !doc.organizationId) {
+      doc.organizationId = doc.orgId;
+    } else if (doc.organizationId && !doc.orgId) {
+      doc.orgId = doc.organizationId;
+    }
+    this.memoryCache.push(doc);
+    this.persist();
+    this.syncMongo(doc, "upsert");
+  }
+
+  public update(id: string, update: Partial<T>): void {
+    if (!this.isLoaded) this.load();
+    const idx = this.memoryCache.findIndex(item => item.id === id);
+    if (idx !== -1) {
+      const cleanUpdate: any = {};
+      for (const [k, v] of Object.entries(update)) {
+        if (v !== undefined) {
+          cleanUpdate[k] = v;
+        }
+      }
+      this.memoryCache[idx] = { ...this.memoryCache[idx], ...cleanUpdate };
+      this.persist();
+      this.syncMongo(this.memoryCache[idx], "upsert");
+    }
+  }
+
+  public delete(id: string): void {
+    if (!this.isLoaded) this.load();
+    const target = this.memoryCache.find(item => item.id === id);
+    this.memoryCache = this.memoryCache.filter(item => item.id !== id);
+    this.persist();
+    if (target) {
+      this.syncMongo(target, "delete");
+    }
+  }
+
+  public count(filter?: (item: T) => boolean): number {
+    if (!this.isLoaded) this.load();
+    return filter ? this.memoryCache.filter(filter).length : this.memoryCache.length;
+  }
+}
+
+class DBStore {
+  // 19 Independent Collection Repositories
+  private repos = {
+    organizations: new CollectionRepository<Organization>(COLLECTION_NAMES.ORGANIZATIONS),
+    users: new CollectionRepository<User>(COLLECTION_NAMES.USERS),
+    students: new CollectionRepository<Student>(COLLECTION_NAMES.STUDENTS),
+    membershipPlans: new CollectionRepository<MembershipPlan>(COLLECTION_NAMES.MEMBERSHIP_PLANS),
+    memberships: new CollectionRepository<Membership>(COLLECTION_NAMES.MEMBERSHIPS),
+    buildings: new CollectionRepository<Building>(COLLECTION_NAMES.BUILDINGS),
+    floors: new CollectionRepository<Floor>(COLLECTION_NAMES.FLOORS),
+    rooms: new CollectionRepository<Room>(COLLECTION_NAMES.ROOMS),
+    seats: new CollectionRepository<Seat>(COLLECTION_NAMES.SEATS),
+    seatHistory: new CollectionRepository<SeatAssignmentHistory>(COLLECTION_NAMES.SEAT_HISTORY),
+    attendances: new CollectionRepository<Attendance>(COLLECTION_NAMES.ATTENDANCES),
+    payments: new CollectionRepository<Payment>(COLLECTION_NAMES.PAYMENTS),
+    invoices: new CollectionRepository<Invoice>(COLLECTION_NAMES.INVOICES),
+    notifications: new CollectionRepository<Notification>(COLLECTION_NAMES.NOTIFICATIONS),
+    auditLogs: new CollectionRepository<AuditLog>(COLLECTION_NAMES.AUDIT_LOGS),
+    announcements: new CollectionRepository<Announcement>(COLLECTION_NAMES.ANNOUNCEMENTS),
+    expenses: new CollectionRepository<Expense>(COLLECTION_NAMES.EXPENSES),
+    whatsappConfigs: new CollectionRepository<WhatsAppConfig>(COLLECTION_NAMES.WHATSAPP_CONFIGS),
+    whatsappLogs: new CollectionRepository<WhatsAppLog>(COLLECTION_NAMES.WHATSAPP_LOGS)
+  };
+
+  public async initialize(): Promise<void> {
+    try {
+      console.log(" Initializing StudySphere multi-collection database architecture...");
+
+      // Check if legacy monolithic db.json exists and data/ is not yet populated
+      const orgFile = path.join(DATA_DIR, `${COLLECTION_NAMES.ORGANIZATIONS}.json`);
+      if (fs.existsSync(LEGACY_DB_FILE) && (!fs.existsSync(orgFile) || fs.readFileSync(orgFile, "utf-8").trim() === "[]")) {
+        console.log(" Legacy monolithic database detected. Running automated migration to 19 separate collections...");
+        await runMigration();
+      }
+
+      // Load all 19 separate collection repositories
+      Object.values(this.repos).forEach(repo => repo.load());
+
+      // Attempt live MongoDB index initialization if configured
+      const db = await getMongoDb();
+      if (db) {
+        await initializeMongoIndexes(db);
+      }
+
+      console.log(" All 19 collections loaded successfully into discrete database models.");
+    } catch (error) {
+      console.error(" Failed to initialize database store:", error);
     }
   }
 
   public getStatus() {
     return {
-      connected: "local",
-      type: "JSON Local File",
-      details: `Connected to local db.json database. Records: ${this.data.students.length} students, ${this.data.organizations.length} organizations.`
+      connected: "active",
+      type: "Multi-Tenant Discrete Collections",
+      collectionsCount: 19,
+      details: `Active multi-collection storage. Total: ${this.repos.students.count()} students, ${this.repos.organizations.count()} organizations, ${this.repos.seats.count()} seats, ${this.repos.attendances.count()} attendance logs.`
     };
   }
 
   // 1. Organizations
   public getOrganizations(): Organization[] {
-    return this.data.organizations;
+    return this.repos.organizations.getAll();
+  }
+  public getOrganizationById(id: string): Organization | undefined {
+    return this.repos.organizations.findById(id);
   }
   public addOrganization(org: Organization): void {
-    this.data.organizations.push(org);
-    this.save();
+    this.repos.organizations.insert(org);
   }
   public updateOrganization(id: string, update: Partial<Organization>): void {
-    const idx = this.data.organizations.findIndex(o => o.id === id);
-    if (idx !== -1) {
-      this.data.organizations[idx] = { ...this.data.organizations[idx], ...update };
-      this.save();
-    }
+    this.repos.organizations.update(id, update);
   }
   public deleteOrganization(id: string): void {
-    this.data.organizations = this.data.organizations.filter(o => o.id !== id);
-    this.save();
+    this.repos.organizations.delete(id);
   }
 
   // 2. Users
   public getUsers(): User[] {
-    return this.data.users;
+    return this.repos.users.getAll();
+  }
+  public getUsersByOrg(orgId: string): User[] {
+    return this.repos.users.findByOrg(orgId);
   }
   public addUser(user: User): void {
-    this.data.users.push(user);
-    this.save();
+    this.repos.users.insert(user);
   }
   public updateUser(id: string, update: Partial<User>): void {
-    const idx = this.data.users.findIndex(u => u.id === id);
-    if (idx !== -1) {
-      this.data.users[idx] = { ...this.data.users[idx], ...update };
-      this.save();
-    }
+    this.repos.users.update(id, update);
   }
 
   // 3. Students
   public getStudents(): Student[] {
-    return this.data.students;
+    return this.repos.students.getAll();
+  }
+  public getStudentsByOrg(orgId: string): Student[] {
+    return this.repos.students.findByOrg(orgId);
   }
   public addStudent(student: Student): void {
-    this.data.students.push(student);
-    this.save();
+    this.repos.students.insert(student);
   }
   public updateStudent(id: string, update: Partial<Student>): void {
-    const idx = this.data.students.findIndex(s => s.id === id);
-    if (idx !== -1) {
-      this.data.students[idx] = { ...this.data.students[idx], ...update };
-      this.save();
-    }
+    this.repos.students.update(id, update);
   }
   public deleteStudent(id: string): void {
-    // Soft-delete/deactivate student
-    const idx = this.data.students.findIndex(s => s.id === id);
-    if (idx !== -1) {
-      this.data.students[idx].status = "inactive";
-      this.save();
-    }
+    this.repos.students.update(id, { status: "inactive" } as any);
   }
   public permanentlyDeleteStudent(id: string): void {
-    this.data.students = this.data.students.filter(s => s.id !== id);
-    this.save();
+    this.repos.students.delete(id);
   }
 
   // 4. Membership Plans
   public getPlans(): MembershipPlan[] {
-    return this.data.membershipPlans;
+    return this.repos.membershipPlans.getAll();
+  }
+  public getPlansByOrg(orgId: string): MembershipPlan[] {
+    return this.repos.membershipPlans.findByOrg(orgId);
   }
   public addPlan(plan: MembershipPlan): void {
-    this.data.membershipPlans.push(plan);
-    this.save();
+    this.repos.membershipPlans.insert(plan);
   }
   public updatePlan(id: string, update: Partial<MembershipPlan>): void {
-    const idx = this.data.membershipPlans.findIndex(p => p.id === id);
-    if (idx !== -1) {
-      this.data.membershipPlans[idx] = { ...this.data.membershipPlans[idx], ...update };
-      this.save();
-    }
+    this.repos.membershipPlans.update(id, update);
   }
   public deletePlan(id: string): void {
-    this.data.membershipPlans = this.data.membershipPlans.filter(p => p.id !== id);
-    this.save();
+    this.repos.membershipPlans.delete(id);
   }
 
   // 5. Memberships
   public getMemberships(): Membership[] {
-    return this.data.memberships;
+    return this.repos.memberships.getAll();
+  }
+  public getMembershipsByOrg(orgId: string): Membership[] {
+    return this.repos.memberships.findByOrg(orgId);
   }
   public addMembership(memb: Membership): void {
-    this.data.memberships.push(memb);
-    this.save();
+    this.repos.memberships.insert(memb);
   }
   public updateMembership(id: string, update: Partial<Membership>): void {
-    const idx = this.data.memberships.findIndex(m => m.id === id);
-    if (idx !== -1) {
-      this.data.memberships[idx] = { ...this.data.memberships[idx], ...update };
-      this.save();
-    }
+    this.repos.memberships.update(id, update);
   }
   public deleteMembership(id: string): void {
-    this.data.memberships = this.data.memberships.filter(m => m.id !== id);
-    this.save();
+    this.repos.memberships.delete(id);
   }
 
   // 6. Payments
   public getPayments(): Payment[] {
-    return this.data.payments;
+    return this.repos.payments.getAll();
+  }
+  public getPaymentsByOrg(orgId: string): Payment[] {
+    return this.repos.payments.findByOrg(orgId);
   }
   public addPayment(payment: Payment): void {
-    this.data.payments.push(payment);
-    this.save();
+    this.repos.payments.insert(payment);
   }
   public updatePayment(id: string, update: Partial<Payment>): void {
-    const idx = this.data.payments.findIndex(p => p.id === id);
-    if (idx !== -1) {
-      this.data.payments[idx] = { ...this.data.payments[idx], ...update };
-      this.save();
-    }
+    this.repos.payments.update(id, update);
   }
 
   // 7. Invoices
   public getInvoices(): Invoice[] {
-    return this.data.invoices;
+    return this.repos.invoices.getAll();
+  }
+  public getInvoicesByOrg(orgId: string): Invoice[] {
+    return this.repos.invoices.findByOrg(orgId);
   }
   public addInvoice(invoice: Invoice): void {
-    this.data.invoices.push(invoice);
-    this.save();
+    this.repos.invoices.insert(invoice);
   }
 
   // 8. Expenses
   public getExpenses(): Expense[] {
-    return this.data.expenses;
+    return this.repos.expenses.getAll();
+  }
+  public getExpensesByOrg(orgId: string): Expense[] {
+    return this.repos.expenses.findByOrg(orgId);
   }
   public addExpense(expense: Expense): void {
-    this.data.expenses.push(expense);
-    this.save();
+    this.repos.expenses.insert(expense);
   }
   public deleteExpense(id: string): void {
-    this.data.expenses = this.data.expenses.filter(e => e.id !== id);
-    this.save();
+    this.repos.expenses.delete(id);
   }
 
   // 9. Notifications
   public getNotifications(): Notification[] {
-    return this.data.notifications;
+    return this.repos.notifications.getAll();
+  }
+  public getNotificationsByOrg(orgId: string): Notification[] {
+    return this.repos.notifications.findByOrg(orgId);
   }
   public addNotification(notification: Notification): void {
-    this.data.notifications.push(notification);
-    this.save();
+    this.repos.notifications.insert(notification);
   }
   public updateNotification(id: string, update: Partial<Notification>): void {
-    const idx = this.data.notifications.findIndex(n => n.id === id);
-    if (idx !== -1) {
-      this.data.notifications[idx] = { ...this.data.notifications[idx], ...update };
-      this.save();
-    }
+    this.repos.notifications.update(id, update);
   }
 
   // 10. WhatsApp Configs
   public getWhatsAppConfigs(): WhatsAppConfig[] {
-    return this.data.whatsappConfigs;
+    return this.repos.whatsappConfigs.getAll();
+  }
+  public getWhatsAppConfigByOrg(orgId: string): WhatsAppConfig | undefined {
+    return this.repos.whatsappConfigs.findByOrg(orgId)[0];
   }
   public updateWhatsAppConfig(orgId: string, update: Partial<WhatsAppConfig>): void {
-    const idx = this.data.whatsappConfigs.findIndex(c => c.orgId === orgId);
-    if (idx !== -1) {
-      this.data.whatsappConfigs[idx] = { ...this.data.whatsappConfigs[idx], ...update };
+    const existing = this.getWhatsAppConfigByOrg(orgId);
+    if (existing) {
+      this.repos.whatsappConfigs.update(existing.id, update);
     } else {
       const newConfig: WhatsAppConfig = {
         id: `wac-${Date.now()}`,
@@ -305,108 +383,132 @@ class DBStore {
         },
         triggerDaysBefore: update.triggerDaysBefore ?? 3
       };
-      this.data.whatsappConfigs.push(newConfig);
+      this.repos.whatsappConfigs.insert(newConfig);
     }
-    this.save();
   }
 
   // 11. WhatsApp Logs
   public getWhatsAppLogs(): WhatsAppLog[] {
-    return this.data.whatsappLogs;
+    return this.repos.whatsappLogs.getAll();
+  }
+  public getWhatsAppLogsByOrg(orgId: string): WhatsAppLog[] {
+    return this.repos.whatsappLogs.findByOrg(orgId);
   }
   public addWhatsAppLog(log: WhatsAppLog): void {
-    this.data.whatsappLogs.push(log);
-    this.save();
+    this.repos.whatsappLogs.insert(log);
   }
 
   // 12. Audit Logs
   public getAuditLogs(): AuditLog[] {
-    return this.data.auditLogs;
+    return this.repos.auditLogs.getAll();
+  }
+  public getAuditLogsByOrg(orgId: string | null): AuditLog[] {
+    if (!orgId) return this.repos.auditLogs.getAll();
+    return this.repos.auditLogs.getAll().filter(l => (l.orgId ?? (l as any).organizationId) === orgId);
   }
   public addAuditLog(log: AuditLog): void {
-    this.data.auditLogs.push(log);
-    this.save();
+    this.repos.auditLogs.insert(log);
   }
 
   // 13. Announcements
   public getAnnouncements(): Announcement[] {
-    return this.data.announcements;
+    return this.repos.announcements.getAll();
+  }
+  public getAnnouncementsByOrg(orgId: string | null): Announcement[] {
+    return this.repos.announcements.getAll().filter(a => {
+      const aOrg = a.orgId ?? (a as any).organizationId;
+      return aOrg === null || aOrg === undefined || aOrg === orgId;
+    });
   }
   public addAnnouncement(announcement: Announcement): void {
-    this.data.announcements.push(announcement);
-    this.save();
+    this.repos.announcements.insert(announcement);
   }
   public deleteAnnouncement(id: string): void {
-    this.data.announcements = this.data.announcements.filter(a => a.id !== id);
-    this.save();
+    this.repos.announcements.delete(id);
   }
 
   // 14. Buildings
   public getBuildings(): Building[] {
-    return this.data.buildings;
+    return this.repos.buildings.getAll();
+  }
+  public getBuildingsByOrg(orgId: string): Building[] {
+    return this.repos.buildings.findByOrg(orgId);
   }
   public addBuilding(bld: Building): void {
-    this.data.buildings.push(bld);
-    this.save();
+    this.repos.buildings.insert(bld);
+  }
+  public deleteBuilding(id: string): void {
+    this.repos.buildings.delete(id);
   }
 
   // 15. Floors
   public getFloors(): Floor[] {
-    return this.data.floors;
+    return this.repos.floors.getAll();
+  }
+  public getFloorsByOrg(orgId: string): Floor[] {
+    return this.repos.floors.findByOrg(orgId);
   }
   public addFloor(flr: Floor): void {
-    this.data.floors.push(flr);
-    this.save();
+    this.repos.floors.insert(flr);
+  }
+  public deleteFloor(id: string): void {
+    this.repos.floors.delete(id);
   }
 
   // 16. Rooms
   public getRooms(): Room[] {
-    return this.data.rooms;
+    return this.repos.rooms.getAll();
+  }
+  public getRoomsByOrg(orgId: string): Room[] {
+    return this.repos.rooms.findByOrg(orgId);
   }
   public addRoom(rm: Room): void {
-    this.data.rooms.push(rm);
-    this.save();
+    this.repos.rooms.insert(rm);
+  }
+  public deleteRoom(id: string): void {
+    this.repos.rooms.delete(id);
   }
 
   // 17. Seats
   public getSeats(): Seat[] {
-    return this.data.seats;
+    return this.repos.seats.getAll();
+  }
+  public getSeatsByOrg(orgId: string): Seat[] {
+    return this.repos.seats.findByOrg(orgId);
   }
   public addSeat(seat: Seat): void {
-    this.data.seats.push(seat);
-    this.save();
+    this.repos.seats.insert(seat);
   }
   public updateSeat(id: string, update: Partial<Seat>): void {
-    const idx = this.data.seats.findIndex(s => s.id === id);
-    if (idx !== -1) {
-      this.data.seats[idx] = { ...this.data.seats[idx], ...update };
-      this.save();
-    }
+    this.repos.seats.update(id, update);
+  }
+  public deleteSeat(id: string): void {
+    this.repos.seats.delete(id);
   }
 
   // 18. Seat History
   public getSeatHistory(): SeatAssignmentHistory[] {
-    return this.data.seatHistory;
+    return this.repos.seatHistory.getAll();
+  }
+  public getSeatHistoryByOrg(orgId: string): SeatAssignmentHistory[] {
+    return this.repos.seatHistory.findByOrg(orgId);
   }
   public addSeatHistory(sh: SeatAssignmentHistory): void {
-    this.data.seatHistory.push(sh);
-    this.save();
+    this.repos.seatHistory.insert(sh);
   }
 
   // 19. Attendances
   public getAttendances(): Attendance[] {
-    return this.data.attendances;
+    return this.repos.attendances.getAll();
+  }
+  public getAttendancesByOrg(orgId: string): Attendance[] {
+    return this.repos.attendances.findByOrg(orgId);
   }
   public addAttendance(attendance: Attendance): void {
-    this.data.attendances.push(attendance);
-    this.save();
+    this.repos.attendances.insert(attendance);
   }
   public updateAttendance(id: string, update: Partial<Attendance>): void {
-    const idx = this.data.attendances.findIndex(a => a.id === id);
-    if (idx !== -1) {
-      this.data.attendances[idx] = { ...this.data.attendances[idx], ...update };
-      this.save();
-    }
+    this.repos.attendances.update(id, update);
   }
 }
 

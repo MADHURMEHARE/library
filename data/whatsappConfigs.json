@@ -1,0 +1,22 @@
+[
+  {
+    "id": "wac-org-1",
+    "orgId": "org-1",
+    "provider": "sandbox",
+    "accountSid": "",
+    "authToken": "",
+    "phoneNumber": "+91 98765 43210",
+    "apiKey": "",
+    "autoSendFeeReceipt": true,
+    "autoSendExpiryAlert": true,
+    "autoSendCheckinAlert": false,
+    "triggerDaysBefore": 3,
+    "templates": {
+      "welcome": "Welcome to {{org_name}}, {{name}}! Your profile has been registered.",
+      "upcomingRenewal": "Hi {{name}}, your membership at {{org_name}} expires in {{days}} days ({{end_date}}). Please renew to retain seat {{seat_number}}.",
+      "expiredAlert": "Hi {{name}}, your membership at {{org_name}} has expired on {{end_date}}. Seat {{seat_number}} has been released.",
+      "paymentReceipt": "Hi {{name}}, payment of {{currency}} {{amount}} received for {{plan_name}} at {{org_name}}."
+    },
+    "updatedAt": "2026-08-16T08:27:51.512Z"
+  }
+]

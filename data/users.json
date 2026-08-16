@@ -1,0 +1,38 @@
+[
+  {
+    "id": "user-super",
+    "organizationId": null,
+    "orgId": null,
+    "email": "superadmin@platform.com",
+    "name": "Aarav Sharma (Super Admin)",
+    "role": "SUPER_ADMIN",
+    "phone": "+91 99999 99999",
+    "status": "active",
+    "emailVerified": true,
+    "createdAt": "2026-08-16T08:27:51.512Z"
+  },
+  {
+    "id": "user-admin-1",
+    "organizationId": "org-1",
+    "orgId": "org-1",
+    "email": "admin@athena.com",
+    "name": "Vikram Malhotra",
+    "role": "ORG_ADMIN",
+    "phone": "+91 98765 43210",
+    "status": "active",
+    "emailVerified": true,
+    "createdAt": "2026-08-16T08:27:51.512Z"
+  },
+  {
+    "id": "user-staff-1",
+    "organizationId": "org-1",
+    "orgId": "org-1",
+    "email": "staff@athena.com",
+    "name": "Priya Patel",
+    "role": "RECEPTIONIST",
+    "phone": "+91 98765 22222",
+    "status": "active",
+    "emailVerified": true,
+    "createdAt": "2026-08-16T08:27:51.512Z"
+  }
+]
