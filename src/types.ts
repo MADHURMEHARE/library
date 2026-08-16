@@ -226,11 +226,15 @@ export interface WhatsAppConfig {
   apiKey: string;
   phoneId: string;
   senderNumber: string;
+  apiUrl?: string;
+  apiToken?: string;
   templates: {
     welcome: string;
     upcomingRenewal: string;
     expiredAlert: string;
     paymentReceipt: string;
+    expiryWarn?: string;
+    renewalSuccess?: string;
   };
   triggerDaysBefore: number;
 }

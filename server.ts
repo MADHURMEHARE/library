@@ -8,6 +8,7 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { dbStore } from "./server/dbStore";
+import jwt from "jsonwebtoken";
 import {
   Organization,
   User,
@@ -36,6 +37,16 @@ const PORT = 3000;
 
 app.use(express.json({ limit: "50mb" }));
 
+// JWT Authentication Secret
+const JWT_SECRET = process.env.JWT_SECRET || "saas-secret-jwt-key-2026-omnipass";
+
+// SaaS Platform Subscriptions and Tiers
+const SAAS_PLANS = [
+  { id: "basic", name: "SaaS Basic Plan", price: 1500, maxStudents: 50, maxSeats: 30, features: ["Seat Allocation", "Basic Attendance", "Cash Payments"] },
+  { id: "standard", name: "SaaS Standard Plan", price: 3000, maxStudents: 150, maxSeats: 100, features: ["AC/Non-AC Spaces", "QR Code Attendance", "UPI/Card Payments", "Basic Reports"] },
+  { id: "premium", name: "SaaS Premium Plan", price: 6000, maxStudents: 500, maxSeats: 400, features: ["Unlimited Rooms", "Student ID Generator", "Receipt Printers", "Advanced Analytics", "Audit Timelines"] }
+];
+
 // Helper function to write audit log
 function logAction(userId: string, userName: string, orgId: string | null, action: string, details: string) {
   dbStore.addAuditLog({
@@ -48,6 +59,62 @@ function logAction(userId: string, userName: string, orgId: string | null, actio
     timestamp: new Date().toISOString()
   });
 }
+
+// Authentication Middleware
+const authenticateToken = (req: any, res: express.Response, next: express.NextFunction) => {
+  const authHeader = req.headers["authorization"];
+  const token = authHeader && authHeader.split(" ")[1];
+
+  if (!token) {
+    return res.status(401).json({ error: "Access token required" });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err: any, decoded: any) => {
+    if (err) {
+      return res.status(403).json({ error: "Your session has expired or the token is invalid. Please log in again." });
+    }
+    req.user = decoded;
+    next();
+  });
+};
+
+// SaaS Multi-Tenant Isolation / Scope Guard Middleware
+const requireTenant = (req: any, res: express.Response, next: express.NextFunction) => {
+  if (!req.user) {
+    return res.status(401).json({ error: "Authentication required" });
+  }
+  
+  // Super Admins bypass tenant scope unless querying/modifying a specific tenant
+  if (req.user.role === "SUPER_ADMIN") {
+    next();
+    return;
+  }
+
+  const userOrgId = req.user.orgId;
+  if (!userOrgId) {
+    return res.status(403).json({ error: "No organization associated with this account." });
+  }
+
+  // Enforce SaaS data isolation
+  if (req.method === "GET") {
+    req.query.orgId = userOrgId;
+  } else {
+    req.body.orgId = userOrgId;
+  }
+
+  next();
+};
+
+// Super Admin Privileges Guard Middleware
+const requireSuperAdmin = (req: any, res: express.Response, next: express.NextFunction) => {
+  if (!req.user) {
+    return res.status(401).json({ error: "Authentication required" });
+  }
+  if (req.user.role !== "SUPER_ADMIN") {
+    return res.status(403).json({ error: "Access denied. Platform Administrator privileges required." });
+  }
+  next();
+};
 
 // ==========================================
 // AUTHENTICATION ENDPOINTS
@@ -81,8 +148,12 @@ app.post("/api/auth/login", (req, res) => {
     }
   }
 
-  // Generate a mock JWT token (represented as a JSON string with details for ease)
-  const token = Buffer.from(JSON.stringify({ id: user.id, orgId: user.orgId, role: user.role })).toString("base64");
+  // Generate a real signed JWT token
+  const token = jwt.sign(
+    { id: user.id, orgId: user.orgId, role: user.role, name: user.name },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
 
   logAction(user.id, user.name, user.orgId, "LOGIN", "User logged in successfully.");
 
@@ -121,8 +192,156 @@ app.post("/api/auth/reset-password", (req, res) => {
   res.json({ message: "Password updated successfully!" });
 });
 
-app.post("/api/auth/profile", (req, res) => {
-  const { userId, name, phone, email } = req.body;
+app.get("/api/auth/me", authenticateToken, (req: any, res) => {
+  const userId = req.user.id;
+  const user = dbStore.getUsers().find(u => u.id === userId);
+  if (!user) {
+    return res.status(404).json({ error: "User profile not found." });
+  }
+
+  if (user.status === "inactive") {
+    return res.status(403).json({ error: "Your account is inactive. Please contact support." });
+  }
+
+  let org: Organization | null = null;
+  if (user.orgId) {
+    const foundOrg = dbStore.getOrganizations().find(o => o.id === user.orgId);
+    if (foundOrg) {
+      if (foundOrg.status === "suspended") {
+        return res.status(403).json({ error: "This Reading Room organization is suspended." });
+      }
+      org = foundOrg;
+    }
+  }
+
+  res.json({
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      phone: user.phone,
+      emailVerified: user.emailVerified,
+      status: user.status,
+      orgId: user.orgId
+    },
+    organization: org
+  });
+});
+
+app.post("/api/auth/signup", (req, res) => {
+  const { name, email, adminName, adminEmail, adminPhone, planId } = req.body;
+  if (!name || !email || !adminEmail || !adminName) {
+    return res.status(400).json({ error: "All fields are required to register your organization." });
+  }
+
+  // Check if user email already exists
+  const emailExists = dbStore.getUsers().some(u => u.email.toLowerCase() === adminEmail.toLowerCase());
+  if (emailExists) {
+    return res.status(400).json({ error: "An account with this email address already exists." });
+  }
+
+  const orgId = `org-${Date.now()}`;
+  const newOrg: Organization = {
+    id: orgId,
+    name,
+    logo: "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?q=80&w=200&auto=format&fit=crop",
+    address: "Default Address",
+    phone: adminPhone || "+123456789",
+    email,
+    openingTime: "06:00",
+    closingTime: "23:00",
+    currency: "INR",
+    timezone: "Asia/Kolkata",
+    status: "active",
+    planId: planId || "basic",
+    createdAt: new Date().toISOString()
+  };
+
+  dbStore.addOrganization(newOrg);
+
+  const adminId = `user-admin-${Date.now()}`;
+  const newAdmin: User = {
+    id: adminId,
+    orgId: orgId,
+    email: adminEmail,
+    name: adminName,
+    role: "ORG_ADMIN",
+    phone: adminPhone || "+123456789",
+    status: "active",
+    emailVerified: true,
+    createdAt: new Date().toISOString()
+  };
+  dbStore.addUser(newAdmin);
+
+  // Auto-generate basic layout structures so the room is ready out of the box!
+  const bldId = `bld-${Date.now()}`;
+  dbStore.addBuilding({ id: bldId, orgId, name: "Alpha Block", createdAt: new Date().toISOString() });
+
+  const flrId = `flr-${Date.now()}`;
+  dbStore.addFloor({ id: flrId, orgId, buildingId: bldId, name: "1st Floor", createdAt: new Date().toISOString() });
+
+  const rmId = `rm-${Date.now()}`;
+  dbStore.addRoom({ id: rmId, orgId, floorId: flrId, name: "Hall A (Silent)", createdAt: new Date().toISOString() });
+
+  // Generate 8 basic seats
+  for (let i = 1; i <= 8; i++) {
+    dbStore.addSeat({
+      id: `seat-${orgId}-rm-${i}`,
+      orgId,
+      roomId: rmId,
+      seatNumber: `S-${i.toString().padStart(2, "0")}`,
+      type: i % 4 === 0 ? "Premium" : "AC",
+      status: "available",
+      assignedStudentId: null,
+      notes: "Newly provisioned silent desk.",
+      row: "Row A",
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  // Pre-generate standard membership plans
+  dbStore.addPlan({
+    id: `plan-${orgId}-monthly`,
+    orgId,
+    name: "Standard Monthly Pass",
+    durationType: "monthly",
+    durationDays: 30,
+    price: 2000,
+    seatType: "AC",
+    status: "active",
+    timing: "Full Day (6 AM - 11 PM)",
+    description: "Full day seat reservation with central air-conditioning.",
+    createdAt: new Date().toISOString()
+  });
+
+  logAction(adminId, adminName, orgId, "SIGNUP", `Signed up organization ${name} under ${planId} plan`);
+
+  const token = jwt.sign(
+    { id: adminId, orgId, role: "ORG_ADMIN", name: adminName },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+
+  res.json({
+    token,
+    user: {
+      id: adminId,
+      email: newAdmin.email,
+      name: newAdmin.name,
+      role: newAdmin.role,
+      phone: newAdmin.phone,
+      emailVerified: newAdmin.emailVerified,
+      status: newAdmin.status,
+      orgId
+    },
+    organization: newOrg
+  });
+});
+
+app.post("/api/auth/profile", authenticateToken, (req: any, res) => {
+  const { name, phone, email } = req.body;
+  const userId = req.user.id;
   const user = dbStore.getUsers().find(u => u.id === userId);
   if (!user) {
     return res.status(404).json({ error: "User not found" });
@@ -140,11 +359,11 @@ app.post("/api/auth/profile", (req, res) => {
 // TENANT / ORGANIZATION MANAGEMENT (SUPER ADMIN)
 // ==========================================
 
-app.get("/api/organizations", (req, res) => {
+app.get("/api/organizations", authenticateToken, requireSuperAdmin, (req, res) => {
   res.json(dbStore.getOrganizations());
 });
 
-app.post("/api/organizations", (req, res) => {
+app.post("/api/organizations", authenticateToken, requireSuperAdmin, (req, res) => {
   const { name, logo, address, phone, email, currency, timezone, planId, adminName, adminEmail } = req.body;
   if (!name || !email) {
     return res.status(400).json({ error: "Organization name and email are required" });
@@ -230,15 +449,18 @@ app.post("/api/organizations", (req, res) => {
   res.json({ organization: newOrg, admin: newAdmin });
 });
 
-app.put("/api/organizations/:id", (req, res) => {
+app.put("/api/organizations/:id", authenticateToken, (req: any, res) => {
   const { id } = req.params;
   const data = req.body;
+  if (req.user.role !== "SUPER_ADMIN" && req.user.orgId !== id) {
+    return res.status(403).json({ error: "Access denied. You can only update your own organization details." });
+  }
   dbStore.updateOrganization(id, data);
   const updated = dbStore.getOrganizations().find(o => o.id === id);
   res.json(updated);
 });
 
-app.delete("/api/organizations/:id", (req, res) => {
+app.delete("/api/organizations/:id", authenticateToken, requireSuperAdmin, (req, res) => {
   const { id } = req.params;
   const orgName = dbStore.getOrganizations().find(o => o.id === id)?.name || "Unknown Organization";
   dbStore.deleteOrganization(id);
@@ -251,7 +473,7 @@ app.delete("/api/organizations/:id", (req, res) => {
 // STUDENT MANAGEMENT
 // ==========================================
 
-app.get("/api/students", (req, res) => {
+app.get("/api/students", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId } = req.query;
   if (!orgId) return res.status(400).json({ error: "orgId is required" });
 
@@ -259,15 +481,27 @@ app.get("/api/students", (req, res) => {
   res.json(students);
 });
 
-app.post("/api/students", (req, res) => {
+app.post("/api/students", authenticateToken, requireTenant, (req: any, res) => {
   const {
     orgId, name, gender, dob, phone, parentPhone, email, address,
     emergencyContact, govIdType, govIdNumber, notes, college, course,
-    year, batch, joinDate, photo, creatorId, creatorName
+    year, batch, joinDate, photo
   } = req.body;
 
   if (!orgId || !name || !phone) {
     return res.status(400).json({ error: "Missing required fields (orgId, name, phone)" });
+  }
+
+  // SaaS limits enforcement
+  const org = dbStore.getOrganizations().find(o => o.id === orgId);
+  const planId = org?.planId || "basic";
+  const limitObj = SAAS_PLANS.find(p => p.id === planId) || SAAS_PLANS[0];
+  
+  const currentStudentsCount = dbStore.getStudents().filter(s => s.orgId === orgId).length;
+  if (currentStudentsCount >= limitObj.maxStudents) {
+    return res.status(403).json({
+      error: `Upgrade Required: Your current plan (${limitObj.name}) allows a maximum of ${limitObj.maxStudents} students. You have currently registered ${currentStudentsCount} students. Please upgrade your SaaS plan to add more students.`
+    });
   }
 
   const code = Math.floor(1000 + Math.random() * 9000);
@@ -313,37 +547,52 @@ app.post("/api/students", (req, res) => {
     createdAt: new Date().toISOString()
   });
 
-  logAction(creatorId || "unknown", creatorName || "Staff", orgId, "CREATE_STUDENT", `Registered student ${name} (${studentId})`);
+  const creatorId = req.user.id;
+  const creatorName = req.user.name || "Staff";
+  logAction(creatorId, creatorName, orgId, "CREATE_STUDENT", `Registered student ${name} (${studentId})`);
 
   res.json(newStudent);
 });
 
-app.put("/api/students/:id", (req, res) => {
+app.put("/api/students/:id", authenticateToken, (req: any, res) => {
   const { id } = req.params;
-  const { editorId, editorName, ...data } = req.body;
+  const { ...data } = req.body;
   
   const studentBefore = dbStore.getStudents().find(s => s.id === id);
   if (!studentBefore) return res.status(404).json({ error: "Student not found" });
 
+  if (req.user.role !== "SUPER_ADMIN" && studentBefore.orgId !== req.user.orgId) {
+    return res.status(403).json({ error: "Access denied. You do not have permission to modify this student." });
+  }
+
   dbStore.updateStudent(id, data);
   const updated = dbStore.getStudents().find(s => s.id === id);
 
-  logAction(editorId || "unknown", editorName || "Staff", studentBefore.orgId, "UPDATE_STUDENT", `Updated student details for ${updated?.name} (${updated?.studentId})`);
+  const editorId = req.user.id;
+  const editorName = req.user.name || "Staff";
+  logAction(editorId, editorName, studentBefore.orgId, "UPDATE_STUDENT", `Updated student details for ${updated?.name} (${updated?.studentId})`);
   res.json(updated);
 });
 
-app.delete("/api/students/:id", (req, res) => {
+app.delete("/api/students/:id", authenticateToken, (req: any, res) => {
   const { id } = req.params;
-  const { editorId, editorName, permanent } = req.query;
+  const { permanent } = req.query;
   const student = dbStore.getStudents().find(s => s.id === id);
   if (!student) return res.status(404).json({ error: "Student not found" });
 
+  if (req.user.role !== "SUPER_ADMIN" && student.orgId !== req.user.orgId) {
+    return res.status(403).json({ error: "Access denied. You do not have permission to delete this student." });
+  }
+
+  const editorId = req.user.id;
+  const editorName = req.user.name || "Staff";
+
   if (permanent === "true") {
     dbStore.permanentlyDeleteStudent(id);
-    logAction((editorId as string) || "unknown", (editorName as string) || "Staff", student.orgId, "PERMANENT_DELETE_STUDENT", `Permanently deleted student ${student.name} (${student.studentId})`);
+    logAction(editorId, editorName, student.orgId, "PERMANENT_DELETE_STUDENT", `Permanently deleted student ${student.name} (${student.studentId})`);
   } else {
     dbStore.deleteStudent(id);
-    logAction((editorId as string) || "unknown", (editorName as string) || "Staff", student.orgId, "DELETE_STUDENT", `Deactivated/Soft-deleted student ${student.name} (${student.studentId})`);
+    logAction(editorId, editorName, student.orgId, "DELETE_STUDENT", `Deactivated/Soft-deleted student ${student.name} (${student.studentId})`);
   }
   res.json({ success: true });
 });
@@ -353,13 +602,32 @@ app.delete("/api/students/:id", (req, res) => {
 // MEMBERSHIP PLAN MANAGEMENT
 // ==========================================
 
-app.get("/api/plans", (req, res) => {
+app.post("/api/saas/upgrade", authenticateToken, requireTenant, (req: any, res) => {
+  const { planId } = req.body;
+  const userOrgId = req.user.orgId;
+  if (!userOrgId) {
+    return res.status(400).json({ error: "No organization associated with this account." });
+  }
+
+  const validPlan = SAAS_PLANS.find(p => p.id === planId);
+  if (!validPlan) {
+    return res.status(400).json({ error: "Invalid SaaS plan selected." });
+  }
+
+  dbStore.updateOrganization(userOrgId, { planId });
+  const updatedOrg = dbStore.getOrganizations().find(o => o.id === userOrgId);
+
+  logAction(req.user.id, req.user.name || "Admin", userOrgId, "SAAS_UPGRADE", `Upgraded organization subscription to plan: ${validPlan.name}`);
+  res.json({ success: true, organization: updatedOrg });
+});
+
+app.get("/api/plans", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId } = req.query;
   if (!orgId) return res.status(400).json({ error: "orgId is required" });
   res.json(dbStore.getPlans().filter(p => p.orgId === orgId));
 });
 
-app.post("/api/plans", (req, res) => {
+app.post("/api/plans", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId, name, durationType, durationDays, price, seatType, timing, description } = req.body;
   if (!orgId || !name || !price) {
     return res.status(400).json({ error: "Missing required plan parameters." });
@@ -380,24 +648,37 @@ app.post("/api/plans", (req, res) => {
   };
 
   dbStore.addPlan(newPlan);
-  logAction("unknown", "Admin", orgId, "CREATE_PLAN", `Created plan ${name} for ${price} INR.`);
+  logAction(req.user.id, req.user.name || "Admin", orgId, "CREATE_PLAN", `Created plan ${name} for ${price} INR.`);
   res.json(newPlan);
 });
 
-app.put("/api/plans/:id", (req, res) => {
+app.put("/api/plans/:id", authenticateToken, (req: any, res) => {
   const { id } = req.params;
   const data = req.body;
+
+  const plan = dbStore.getPlans().find(p => p.id === id);
+  if (!plan) return res.status(404).json({ error: "Plan not found" });
+
+  if (req.user.role !== "SUPER_ADMIN" && plan.orgId !== req.user.orgId) {
+    return res.status(403).json({ error: "Access denied. You do not have permission to modify this plan." });
+  }
+
   dbStore.updatePlan(id, data);
   const updated = dbStore.getPlans().find(p => p.id === id);
   res.json(updated);
 });
 
-app.delete("/api/plans/:id", (req, res) => {
+app.delete("/api/plans/:id", authenticateToken, (req: any, res) => {
   const { id } = req.params;
   const plan = dbStore.getPlans().find(p => p.id === id);
   if (!plan) return res.status(404).json({ error: "Plan not found" });
+
+  if (req.user.role !== "SUPER_ADMIN" && plan.orgId !== req.user.orgId) {
+    return res.status(403).json({ error: "Access denied. You do not have permission to delete this plan." });
+  }
+
   dbStore.deletePlan(id);
-  logAction("unknown", "Admin", plan.orgId, "DELETE_PLAN", `Deleted membership plan: ${plan.name}`);
+  logAction(req.user.id, req.user.name || "Admin", plan.orgId, "DELETE_PLAN", `Deleted membership plan: ${plan.name}`);
   res.json({ success: true });
 });
 
@@ -406,18 +687,21 @@ app.delete("/api/plans/:id", (req, res) => {
 // MEMBERSHIPS & RENEWALS
 // ==========================================
 
-app.get("/api/memberships", (req, res) => {
+app.get("/api/memberships", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId } = req.query;
   if (!orgId) return res.status(400).json({ error: "orgId is required" });
   res.json(dbStore.getMemberships().filter(m => m.orgId === orgId));
 });
 
 // Create / Purchase / Renew Membership
-app.post("/api/memberships", (req, res) => {
+app.post("/api/memberships", authenticateToken, requireTenant, (req: any, res) => {
   const {
     orgId, studentId, planId, startDate, price, paidAmount, paymentMethod,
-    discount, couponCode, notes, assignSeatId, creatorId, creatorName
+    discount, couponCode, notes, assignSeatId
   } = req.body;
+
+  const creatorId = req.user.id;
+  const creatorName = req.user.name || "Staff";
 
   if (!orgId || !studentId || !planId || !startDate) {
     return res.status(400).json({ error: "Missing required membership parameters." });
@@ -585,12 +869,18 @@ app.post("/api/memberships", (req, res) => {
 });
 
 // Update membership status (pause, cancel)
-app.put("/api/memberships/:id/status", (req, res) => {
+app.put("/api/memberships/:id/status", authenticateToken, (req: any, res) => {
   const { id } = req.params;
-  const { status, updaterId, updaterName } = req.body; // paused, cancelled, expired, active
+  const { status } = req.body; // paused, cancelled, expired, active
+  const updaterId = req.user.id;
+  const updaterName = req.user.name || "Staff";
 
   const memb = dbStore.getMemberships().find(m => m.id === id);
   if (!memb) return res.status(404).json({ error: "Membership not found" });
+
+  if (req.user.role !== "SUPER_ADMIN" && memb.orgId !== req.user.orgId) {
+    return res.status(403).json({ error: "Access denied. You do not have permission to modify this membership status." });
+  }
 
   dbStore.updateMembership(id, { status });
 
@@ -615,15 +905,22 @@ app.put("/api/memberships/:id/status", (req, res) => {
     }
   }
 
-  logAction(updaterId || "unknown", updaterName || "Staff", memb.orgId, "MEMBERSHIP_STATUS_CHANGE", `Updated membership ID ${id} status to ${status}`);
+  logAction(updaterId, updaterName, memb.orgId, "MEMBERSHIP_STATUS_CHANGE", `Updated membership ID ${id} status to ${status}`);
   res.json({ success: true });
 });
 
-app.put("/api/memberships/:id", (req, res) => {
+app.put("/api/memberships/:id", authenticateToken, (req: any, res) => {
   const { id } = req.params;
-  const { planId, startDate, endDate, price, paidAmount, status, updaterId, updaterName } = req.body;
+  const { planId, startDate, endDate, price, paidAmount, status } = req.body;
+  const updaterId = req.user.id;
+  const updaterName = req.user.name || "Staff";
+
   const memb = dbStore.getMemberships().find(m => m.id === id);
   if (!memb) return res.status(404).json({ error: "Membership not found" });
+
+  if (req.user.role !== "SUPER_ADMIN" && memb.orgId !== req.user.orgId) {
+    return res.status(403).json({ error: "Access denied. You do not have permission to modify this membership." });
+  }
 
   dbStore.updateMembership(id, {
     planId,
@@ -635,17 +932,24 @@ app.put("/api/memberships/:id", (req, res) => {
   });
 
   const updated = dbStore.getMemberships().find(m => m.id === id);
-  logAction(updaterId || "unknown", updaterName || "Staff", memb.orgId, "UPDATE_MEMBERSHIP", `Updated membership details for ID: ${id}`);
+  logAction(updaterId, updaterName, memb.orgId, "UPDATE_MEMBERSHIP", `Updated membership details for ID: ${id}`);
   res.json(updated);
 });
 
-app.delete("/api/memberships/:id", (req, res) => {
+app.delete("/api/memberships/:id", authenticateToken, (req: any, res) => {
   const { id } = req.params;
   const memb = dbStore.getMemberships().find(m => m.id === id);
   if (!memb) return res.status(404).json({ error: "Membership not found" });
 
+  if (req.user.role !== "SUPER_ADMIN" && memb.orgId !== req.user.orgId) {
+    return res.status(403).json({ error: "Access denied. You do not have permission to delete this membership." });
+  }
+
+  const editorId = req.user.id;
+  const editorName = req.user.name || "Staff";
+
   dbStore.deleteMembership(id);
-  logAction("unknown", "Admin", memb.orgId, "DELETE_MEMBERSHIP", `Deleted membership with ID: ${id}`);
+  logAction(editorId, editorName, memb.orgId, "DELETE_MEMBERSHIP", `Deleted membership with ID: ${id}`);
   res.json({ success: true });
 });
 
@@ -818,7 +1122,7 @@ app.put("/api/payments/:id/settle", (req, res) => {
 // SEAT & LAYOUT MANAGEMENT
 // ==========================================
 
-app.get("/api/layout/structures", (req, res) => {
+app.get("/api/layout/structures", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId } = req.query;
   if (!orgId) return res.status(400).json({ error: "orgId is required" });
 
@@ -831,29 +1135,42 @@ app.get("/api/layout/structures", (req, res) => {
   });
 });
 
-app.post("/api/layout/buildings", (req, res) => {
+app.post("/api/layout/buildings", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId, name } = req.body;
   const newBld = { id: `bld-${Date.now()}`, orgId, name, createdAt: new Date().toISOString() };
   dbStore.addBuilding(newBld);
   res.json(newBld);
 });
 
-app.post("/api/layout/floors", (req, res) => {
+app.post("/api/layout/floors", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId, buildingId, name } = req.body;
   const newFlr = { id: `flr-${Date.now()}`, orgId, buildingId, name, createdAt: new Date().toISOString() };
   dbStore.addFloor(newFlr);
   res.json(newFlr);
 });
 
-app.post("/api/layout/rooms", (req, res) => {
+app.post("/api/layout/rooms", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId, floorId, name } = req.body;
   const newRm = { id: `rm-${Date.now()}`, orgId, floorId, name, createdAt: new Date().toISOString() };
   dbStore.addRoom(newRm);
   res.json(newRm);
 });
 
-app.post("/api/seats", (req, res) => {
+app.post("/api/seats", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId, roomId, seatNumber, type, notes, row } = req.body;
+  
+  // SaaS seat limits enforcement
+  const org = dbStore.getOrganizations().find(o => o.id === orgId);
+  const planId = org?.planId || "basic";
+  const limitObj = SAAS_PLANS.find(p => p.id === planId) || SAAS_PLANS[0];
+  
+  const currentSeatsCount = dbStore.getSeats().filter(s => s.orgId === orgId).length;
+  if (currentSeatsCount >= limitObj.maxSeats) {
+    return res.status(403).json({
+      error: `Upgrade Required: Your current plan (${limitObj.name}) allows a maximum of ${limitObj.maxSeats} seats. You have currently generated ${currentSeatsCount} seats. Please upgrade your SaaS plan to create more seats.`
+    });
+  }
+
   const newSeat: Seat = {
     id: `seat-${Date.now()}`,
     orgId,
@@ -870,9 +1187,17 @@ app.post("/api/seats", (req, res) => {
   res.json(newSeat);
 });
 
-app.put("/api/seats/:id", (req, res) => {
+app.put("/api/seats/:id", authenticateToken, (req: any, res) => {
   const { id } = req.params;
   const data = req.body;
+  
+  const seat = dbStore.getSeats().find(s => s.id === id);
+  if (!seat) return res.status(404).json({ error: "Seat not found" });
+
+  if (req.user.role !== "SUPER_ADMIN" && seat.orgId !== req.user.orgId) {
+    return res.status(403).json({ error: "Access denied. You do not have permission to modify this seat." });
+  }
+
   dbStore.updateSeat(id, data);
   res.json(dbStore.getSeats().find(s => s.id === id));
 });
@@ -1136,7 +1461,7 @@ function replaceTemplatePlaceholders(
   return text;
 }
 
-app.get("/api/whatsapp/config", (req, res) => {
+app.get("/api/whatsapp/config", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId } = req.query;
   if (!orgId) return res.status(400).json({ error: "orgId is required" });
 
@@ -1148,7 +1473,7 @@ app.get("/api/whatsapp/config", (req, res) => {
   res.json(config);
 });
 
-app.put("/api/whatsapp/config", (req, res) => {
+app.put("/api/whatsapp/config", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId, enabled, provider, apiKey, phoneId, senderNumber, templates, triggerDaysBefore } = req.body;
   if (!orgId) return res.status(400).json({ error: "orgId is required" });
 
@@ -1165,13 +1490,13 @@ app.put("/api/whatsapp/config", (req, res) => {
   res.json({ success: true, config: dbStore.getWhatsAppConfigs().find(c => c.orgId === orgId) });
 });
 
-app.get("/api/whatsapp/logs", (req, res) => {
+app.get("/api/whatsapp/logs", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId } = req.query;
   if (!orgId) return res.status(400).json({ error: "orgId is required" });
   res.json(dbStore.getWhatsAppLogs().filter(l => l.orgId === orgId));
 });
 
-app.post("/api/whatsapp/test", (req, res) => {
+app.post("/api/whatsapp/test", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId, phone, type, studentId, studentName, message } = req.body;
   if (!orgId || !phone) return res.status(400).json({ error: "orgId and phone are required" });
 
@@ -1192,8 +1517,10 @@ app.post("/api/whatsapp/test", (req, res) => {
   res.json({ success: true, log: newLog });
 });
 
-app.post("/api/whatsapp/trigger-renewals", (req, res) => {
-  const { orgId, simulateDate, creatorId, creatorName } = req.body;
+app.post("/api/whatsapp/trigger-renewals", authenticateToken, requireTenant, (req: any, res) => {
+  const { orgId, simulateDate } = req.body;
+  const creatorId = req.user.id;
+  const creatorName = req.user.name || "Staff";
   if (!orgId) return res.status(400).json({ error: "orgId is required" });
 
   const org = dbStore.getOrganizations().find(o => o.id === orgId);
@@ -1450,29 +1777,32 @@ app.post("/api/whatsapp/trigger-renewals", (req, res) => {
 // AUDIT LOGS & ANNOUNCEMENTS
 // ==========================================
 
-app.get("/api/audit-logs", (req, res) => {
+app.get("/api/audit-logs", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId } = req.query;
-  // If no orgId is supplied, this is superadmin platform log retrieval
-  if (!orgId) {
+  // If no orgId is supplied and user is superadmin, return all logs.
+  // Otherwise, it was forced to their own orgId by requireTenant.
+  if (!orgId && req.user.role === "SUPER_ADMIN") {
     return res.json(dbStore.getAuditLogs());
   }
   res.json(dbStore.getAuditLogs().filter(a => a.orgId === orgId));
 });
 
-app.get("/api/announcements", (req, res) => {
+app.get("/api/announcements", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId } = req.query;
   // Get platform-wide (null) + org-specific announcements
   const announcements = dbStore.getAnnouncements().filter(a => a.orgId === null || a.orgId === orgId);
   res.json(announcements);
 });
 
-app.post("/api/announcements", (req, res) => {
+app.post("/api/announcements", authenticateToken, requireTenant, (req: any, res) => {
   const { orgId, title, content } = req.body;
   if (!title || !content) return res.status(400).json({ error: "Missing announcement title or content" });
 
+  const finalOrgId = req.user.role === "SUPER_ADMIN" ? (orgId || null) : req.user.orgId;
+
   const newAnn = {
     id: `ann-${Date.now()}`,
-    orgId: orgId || null,
+    orgId: finalOrgId,
     title,
     content,
     createdAt: new Date().toISOString()
@@ -1481,8 +1811,16 @@ app.post("/api/announcements", (req, res) => {
   res.json(newAnn);
 });
 
-app.delete("/api/announcements/:id", (req, res) => {
-  dbStore.deleteAnnouncement(req.params.id);
+app.delete("/api/announcements/:id", authenticateToken, (req: any, res) => {
+  const { id } = req.params;
+  const ann = dbStore.getAnnouncements().find(a => a.id === id);
+  if (!ann) return res.status(404).json({ error: "Announcement not found" });
+
+  if (req.user.role !== "SUPER_ADMIN" && ann.orgId !== req.user.orgId) {
+    return res.status(403).json({ error: "Access denied." });
+  }
+
+  dbStore.deleteAnnouncement(id);
   res.json({ success: true });
 });
 
@@ -1490,7 +1828,7 @@ app.delete("/api/announcements/:id", (req, res) => {
 // ==========================================
 // SEEDING BACKWARD PATH
 // ==========================================
-app.post("/api/reset-db", (req, res) => {
+app.post("/api/reset-db", authenticateToken, requireSuperAdmin, (req, res) => {
   // Simple safety endpoint to reset DB
   try {
     const DB_FILE = path.join(process.cwd(), "db.json");
@@ -1507,7 +1845,7 @@ app.post("/api/reset-db", (req, res) => {
 // ==========================================
 // DB STATUS / INTERACTIVE APIs
 // ==========================================
-app.get("/api/db-status", (req, res) => {
+app.get("/api/db-status", authenticateToken, requireSuperAdmin, (req, res) => {
   res.json(dbStore.getStatus());
 });
 

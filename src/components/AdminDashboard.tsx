@@ -1028,12 +1028,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       studentId: student.id,
       planId: studentMemb.planId,
       startDate: new Date().toISOString().split("T")[0],
+      endDate: "",
       paidAmount: studentMemb.price.toString(),
       paymentMethod: "upi",
       discount: "",
       couponCode: "",
       notes: "One-click express renewal",
-      assignSeatId: seats.find(s => s.assignedStudentId === student.id)?.id || ""
+      assignSeatId: seats.find(s => s.assignedStudentId === student.id)?.id || "",
+      status: "active"
     });
     setIsMembershipModalOpen(true);
   };
@@ -3529,6 +3531,160 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     Save Changes
                   </button>
                 </form>
+              </div>
+
+              {/* SaaS Subscription Billing Panel */}
+              <div className="rounded-xl border border-slate-200 bg-white p-6 dark:bg-slate-900 dark:border-slate-800 max-w-xl shadow-xs">
+                <div className="flex items-center gap-2 border-b border-slate-100 pb-3 mb-4 dark:border-slate-800">
+                  <div className="p-1.5 bg-indigo-50 dark:bg-indigo-950/40 rounded-lg text-indigo-600 dark:text-indigo-400">
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                    </svg>
+                  </div>
+                  <h3 className="font-display font-bold text-sm text-slate-800 dark:text-slate-100">SaaS Subscription &amp; Billing</h3>
+                </div>
+
+                {(() => {
+                  const SAAS_PLANS_DATA = [
+                    { id: "basic", name: "SaaS Basic Plan", price: 1500, maxStudents: 50, maxSeats: 30, features: ["Seat Allocation", "Basic Attendance", "Cash Payments"] },
+                    { id: "standard", name: "SaaS Standard Plan", price: 3000, maxStudents: 150, maxSeats: 100, features: ["AC/Non-AC Spaces", "QR Code Attendance", "UPI/Card Payments", "Basic Reports"] },
+                    { id: "premium", name: "SaaS Premium Plan", price: 6000, maxStudents: 500, maxSeats: 400, features: ["Unlimited Rooms", "Student ID Generator", "Receipt Printers", "Advanced Analytics", "Audit Timelines"] }
+                  ];
+
+                  const currentPlanId = organization.planId || "basic";
+                  const currentPlan = SAAS_PLANS_DATA.find(p => p.id === currentPlanId) || SAAS_PLANS_DATA[0];
+
+                  const studentUsagePercent = Math.min(100, Math.round((students.length / currentPlan.maxStudents) * 100));
+                  const seatUsagePercent = Math.min(100, Math.round((seats.length / currentPlan.maxSeats) * 100));
+
+                  return (
+                    <div className="space-y-5 text-xs">
+                      {/* Active subscription card */}
+                      <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-100 dark:border-slate-800">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Active Subscription</span>
+                            <h4 className="font-display text-sm font-bold text-slate-800 dark:text-slate-100 mt-0.5">{currentPlan.name}</h4>
+                            <p className="text-[11px] text-slate-500 mt-1">₹{currentPlan.price}/month billing cycle. Auto-renews next month.</p>
+                          </div>
+                          <span className="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                            Active
+                          </span>
+                        </div>
+
+                        {/* Features chips */}
+                        <div className="flex flex-wrap gap-1.5 mt-3">
+                          {currentPlan.features.map(f => (
+                            <span key={f} className="text-[9px] px-1.5 py-0.5 bg-slate-200/60 dark:bg-slate-800/80 rounded font-medium text-slate-600 dark:text-slate-300">
+                              ✓ {f}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Usage meters */}
+                      <div className="space-y-3.5">
+                        <h5 className="font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider text-[10px]">Plan Quota Utilization</h5>
+                        
+                        {/* Student quota */}
+                        <div>
+                          <div className="flex justify-between text-[11px] text-slate-600 dark:text-slate-400 mb-1">
+                            <span>Registered Students quota</span>
+                            <span className="font-bold">{students.length} / {currentPlan.maxStudents} ({studentUsagePercent}%)</span>
+                          </div>
+                          <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                            <div 
+                              style={{ width: `${studentUsagePercent}%` }} 
+                              className={`h-full rounded-full transition-all duration-500 ${
+                                studentUsagePercent > 90 ? "bg-rose-500" : studentUsagePercent > 75 ? "bg-amber-500" : "bg-indigo-600"
+                              }`}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Seats quota */}
+                        <div>
+                          <div className="flex justify-between text-[11px] text-slate-600 dark:text-slate-400 mb-1">
+                            <span>Interactive Cabin Seats quota</span>
+                            <span className="font-bold">{seats.length} / {currentPlan.maxSeats} ({seatUsagePercent}%)</span>
+                          </div>
+                          <div className="h-2 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                            <div 
+                              style={{ width: `${seatUsagePercent}%` }} 
+                              className={`h-full rounded-full transition-all duration-500 ${
+                                seatUsagePercent > 90 ? "bg-rose-500" : seatUsagePercent > 75 ? "bg-amber-500" : "bg-indigo-600"
+                              }`}
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Upgrade Subscription Section */}
+                      <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
+                        <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Change Subscription Plan</label>
+                        <div className="flex gap-3">
+                          <select 
+                            id="saas-plan-select"
+                            defaultValue={currentPlanId}
+                            onChange={(e) => {
+                              const planVal = e.target.value;
+                              (window as any)._selectedSaaSPlan = planVal;
+                            }}
+                            className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-xs bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+                          >
+                            {SAAS_PLANS_DATA.map(p => (
+                              <option key={p.id} value={p.id} disabled={p.id === currentPlanId}>
+                                {p.name} (Max {p.maxStudents} Students, {p.maxSeats} Seats) - ₹{p.price}/mo {p.id === currentPlanId ? "— (Current)" : ""}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const selectEl = document.getElementById("saas-plan-select") as HTMLSelectElement;
+                              const targetPlanId = selectEl?.value || (window as any)._selectedSaaSPlan || currentPlanId;
+                              if (targetPlanId === currentPlanId) {
+                                Swal.fire({ icon: "info", title: "Select a different plan", text: "Please select a different SaaS plan to upgrade/downgrade." });
+                                return;
+                              }
+
+                              const targetPlan = SAAS_PLANS_DATA.find(p => p.id === targetPlanId)!;
+
+                              const result = await Swal.fire({
+                                title: "Confirm Subscription Change",
+                                html: `Are you sure you want to change your SaaS plan to <strong>${targetPlan.name}</strong>?<br/><br/><span class="text-xs text-slate-500">Your account will be instantly scaled. Limits will be adjusted to ${targetPlan.maxStudents} students and ${targetPlan.maxSeats} seats.</span>`,
+                                icon: "question",
+                                showCancelButton: true,
+                                confirmButtonText: "Confirm Change",
+                                confirmButtonColor: "#4f46e5"
+                              });
+
+                              if (result.isConfirmed) {
+                                try {
+                                  const res = await apiCall("/api/saas/upgrade", "POST", { planId: targetPlanId });
+                                  if (res.success) {
+                                    setOrganization({ ...organization, planId: targetPlanId });
+                                    Swal.fire({
+                                      icon: "success",
+                                      title: "Subscription Upgraded",
+                                      text: `Congratulations! Your workspace has been successfully migrated to the ${targetPlan.name}.`,
+                                      timer: 3000
+                                    });
+                                  }
+                                } catch (err: any) {
+                                  Swal.fire({ icon: "error", title: "Action Failed", text: err.message || "Failed to upgrade subscription." });
+                                }
+                              }
+                            }}
+                            className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition"
+                          >
+                            Change Plan
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}
