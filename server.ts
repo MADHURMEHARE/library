@@ -1845,7 +1845,7 @@ app.post("/api/reset-db", authenticateToken, requireSuperAdmin, (req, res) => {
 // ==========================================
 // DB STATUS / INTERACTIVE APIs
 // ==========================================
-app.get("/api/db-status", authenticateToken, requireSuperAdmin, (req, res) => {
+app.get("/api/db-status", authenticateToken, (req, res) => {
   res.json(dbStore.getStatus());
 });
 
