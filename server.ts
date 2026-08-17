@@ -9,6 +9,7 @@ import { createServer as createViteServer } from "vite";
 import { dbStore } from "./server/dbStore";
 import { runSeed } from "./server/db/seed";
 import { runMigration } from "./server/db/migrate";
+import { clearAllDemoData } from "./server/db/clean";
 import jwt from "jsonwebtoken";
 import {
   Organization,
@@ -2341,6 +2342,16 @@ app.delete("/api/announcements/:id", authenticateToken, async (req: any, res) =>
 // ==========================================
 // SEEDING & MIGRATION APIs
 // ==========================================
+app.post("/api/clear-demo-data", authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const result = await clearAllDemoData();
+    await dbStore.initialize();
+    res.json({ success: true, message: "All demo data removed successfully. Clean production state active.", result });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || "Failed to clear demo data" });
+  }
+});
+
 app.post("/api/reset-db", authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     await runSeed();

@@ -10,6 +10,7 @@
     "lint": "tsc --noEmit",
     "migrate": "tsx server/db/migrate.ts",
     "seed": "tsx server/db/seed.ts",
+    "clean-db": "tsx server/db/clean.ts",
     "clean": "rm -rf dist db.json data",
     "init": "tsc --noEmit"
   },

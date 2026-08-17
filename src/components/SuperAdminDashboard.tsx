@@ -334,6 +334,44 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     });
   };
 
+  const handleClearDemoData = async () => {
+    Swal.fire({
+      title: 'Purge All Demo Data?',
+      text: "This will remove all demo organizations, students, seats, attendance records, payments, and mock data from MongoDB Atlas, leaving a clean production state.",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#4f46e5',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: 'Yes, purge demo data',
+      background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+      color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+    }).then(async (result) => {
+      if (result.isConfirmed) {
+        try {
+          await apiCall("/api/clear-demo-data", "POST");
+          Swal.fire({
+            title: 'Clean State Active!',
+            text: 'All demo data has been purged from MongoDB Atlas. System is clean and ready.',
+            icon: 'success',
+            timer: 2000,
+            showConfirmButton: false,
+            background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+            color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+          });
+          fetchData();
+        } catch (err: any) {
+          Swal.fire({
+            title: 'Error!',
+            text: err.message || "Failed to purge demo data.",
+            icon: 'error',
+            background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+            color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+          });
+        }
+      }
+    });
+  };
+
   // Metrics Calculations
   const activeOrgs = organizations.filter(o => o.status === "active").length;
   const totalOrgs = organizations.length;
@@ -380,7 +418,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           {/* Database Status Indicator */}
           <div 
             title={dbStatus.details}
@@ -401,6 +439,15 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
             }`} />
             <span>{dbStatus.type === "JSON Local File" ? "LOCAL" : dbStatus.type} {dbStatus.connected === "error" ? "FAIL" : ""}</span>
           </div>
+
+          <button
+            onClick={handleClearDemoData}
+            title="Purge all demo data from MongoDB Atlas"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-red-600 dark:border-slate-800 dark:text-slate-400 dark:hover:bg-slate-800/80 dark:hover:text-red-400 text-xs font-semibold transition"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Purge Demo Data</span>
+          </button>
 
           <button
             onClick={() => setDarkMode(!darkMode)}

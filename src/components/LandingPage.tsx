@@ -89,7 +89,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, darkMode
               onClick={onGetStarted}
               className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/60 dark:border-white/10 bg-white/40 dark:bg-white/5 backdrop-blur-md px-5 py-3 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-white/70 dark:hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-950 transition shadow-sm"
             >
-              View sandbox login
+              Sign in to Workspace
             </button>
           </div>
 

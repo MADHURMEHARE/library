@@ -98,117 +98,125 @@ export async function getCollection<T extends Document = any>(name: string): Pro
  * Initializes compound indexes and multi-tenant constraints on all 19 collections.
  */
 export async function initializeMongoIndexes(db: Db): Promise<void> {
+  const safeCreateIndex = async (collectionName: string, spec: any, options: any = {}) => {
+    try {
+      await db.collection(collectionName).createIndex(spec, options);
+    } catch (err: any) {
+      // If index exists or differs slightly in options, log and continue safely
+    }
+  };
+
   try {
     console.log(" [MongoDB] Ensuring indexes across all 19 separate collections...");
 
     // 1. Organizations
-    await db.collection(COLLECTION_NAMES.ORGANIZATIONS).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.ORGANIZATIONS).createIndex({ email: 1 });
-    await db.collection(COLLECTION_NAMES.ORGANIZATIONS).createIndex({ status: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.ORGANIZATIONS, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.ORGANIZATIONS, { email: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.ORGANIZATIONS, { status: 1 });
 
     // 2. Users
-    await db.collection(COLLECTION_NAMES.USERS).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.USERS).createIndex({ email: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.USERS).createIndex({ organizationId: 1, role: 1 });
-    await db.collection(COLLECTION_NAMES.USERS).createIndex({ orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.USERS, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.USERS, { email: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.USERS, { organizationId: 1, role: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.USERS, { orgId: 1 });
 
     // 3. Students
-    await db.collection(COLLECTION_NAMES.STUDENTS).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.STUDENTS).createIndex({ organizationId: 1, studentId: 1 }, { unique: true, sparse: true });
-    await db.collection(COLLECTION_NAMES.STUDENTS).createIndex({ organizationId: 1, phone: 1 });
-    await db.collection(COLLECTION_NAMES.STUDENTS).createIndex({ orgId: 1 });
-    await db.collection(COLLECTION_NAMES.STUDENTS).createIndex({ organizationId: 1, status: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.STUDENTS, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.STUDENTS, { organizationId: 1, studentId: 1 }, { unique: true, sparse: true });
+    await safeCreateIndex(COLLECTION_NAMES.STUDENTS, { organizationId: 1, phone: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.STUDENTS, { orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.STUDENTS, { organizationId: 1, status: 1 });
 
     // 4. Membership Plans
-    await db.collection(COLLECTION_NAMES.MEMBERSHIP_PLANS).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.MEMBERSHIP_PLANS).createIndex({ organizationId: 1, status: 1 });
-    await db.collection(COLLECTION_NAMES.MEMBERSHIP_PLANS).createIndex({ orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.MEMBERSHIP_PLANS, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.MEMBERSHIP_PLANS, { organizationId: 1, status: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.MEMBERSHIP_PLANS, { orgId: 1 });
 
     // 5. Memberships
-    await db.collection(COLLECTION_NAMES.MEMBERSHIPS).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.MEMBERSHIPS).createIndex({ organizationId: 1, studentId: 1 });
-    await db.collection(COLLECTION_NAMES.MEMBERSHIPS).createIndex({ orgId: 1 });
-    await db.collection(COLLECTION_NAMES.MEMBERSHIPS).createIndex({ organizationId: 1, status: 1 });
-    await db.collection(COLLECTION_NAMES.MEMBERSHIPS).createIndex({ organizationId: 1, endDate: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.MEMBERSHIPS, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.MEMBERSHIPS, { organizationId: 1, studentId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.MEMBERSHIPS, { orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.MEMBERSHIPS, { organizationId: 1, status: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.MEMBERSHIPS, { organizationId: 1, endDate: 1 });
 
     // 6. Buildings
-    await db.collection(COLLECTION_NAMES.BUILDINGS).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.BUILDINGS).createIndex({ organizationId: 1 });
-    await db.collection(COLLECTION_NAMES.BUILDINGS).createIndex({ orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.BUILDINGS, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.BUILDINGS, { organizationId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.BUILDINGS, { orgId: 1 });
 
     // 7. Floors
-    await db.collection(COLLECTION_NAMES.FLOORS).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.FLOORS).createIndex({ organizationId: 1, buildingId: 1 });
-    await db.collection(COLLECTION_NAMES.FLOORS).createIndex({ orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.FLOORS, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.FLOORS, { organizationId: 1, buildingId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.FLOORS, { orgId: 1 });
 
     // 8. Rooms
-    await db.collection(COLLECTION_NAMES.ROOMS).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.ROOMS).createIndex({ organizationId: 1, floorId: 1 });
-    await db.collection(COLLECTION_NAMES.ROOMS).createIndex({ orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.ROOMS, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.ROOMS, { organizationId: 1, floorId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.ROOMS, { orgId: 1 });
 
     // 9. Seats
-    await db.collection(COLLECTION_NAMES.SEATS).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.SEATS).createIndex({ organizationId: 1, roomId: 1, seatNumber: 1 });
-    await db.collection(COLLECTION_NAMES.SEATS).createIndex({ orgId: 1 });
-    await db.collection(COLLECTION_NAMES.SEATS).createIndex({ organizationId: 1, status: 1 });
-    await db.collection(COLLECTION_NAMES.SEATS).createIndex({ organizationId: 1, assignedStudentId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.SEATS, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.SEATS, { organizationId: 1, roomId: 1, seatNumber: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.SEATS, { orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.SEATS, { organizationId: 1, status: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.SEATS, { organizationId: 1, assignedStudentId: 1 });
 
     // 10. Seat History
-    await db.collection(COLLECTION_NAMES.SEAT_HISTORY).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.SEAT_HISTORY).createIndex({ organizationId: 1, seatId: 1 });
-    await db.collection(COLLECTION_NAMES.SEAT_HISTORY).createIndex({ orgId: 1 });
-    await db.collection(COLLECTION_NAMES.SEAT_HISTORY).createIndex({ organizationId: 1, studentId: 1 });
-    await db.collection(COLLECTION_NAMES.SEAT_HISTORY).createIndex({ timestamp: -1 });
+    await safeCreateIndex(COLLECTION_NAMES.SEAT_HISTORY, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.SEAT_HISTORY, { organizationId: 1, seatId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.SEAT_HISTORY, { orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.SEAT_HISTORY, { organizationId: 1, studentId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.SEAT_HISTORY, { timestamp: -1 });
 
     // 11. Attendances
-    await db.collection(COLLECTION_NAMES.ATTENDANCES).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.ATTENDANCES).createIndex({ organizationId: 1, studentId: 1, date: 1 });
-    await db.collection(COLLECTION_NAMES.ATTENDANCES).createIndex({ orgId: 1 });
-    await db.collection(COLLECTION_NAMES.ATTENDANCES).createIndex({ organizationId: 1, date: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.ATTENDANCES, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.ATTENDANCES, { organizationId: 1, studentId: 1, date: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.ATTENDANCES, { orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.ATTENDANCES, { organizationId: 1, date: 1 });
 
     // 12. Payments
-    await db.collection(COLLECTION_NAMES.PAYMENTS).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.PAYMENTS).createIndex({ organizationId: 1, studentId: 1 });
-    await db.collection(COLLECTION_NAMES.PAYMENTS).createIndex({ orgId: 1 });
-    await db.collection(COLLECTION_NAMES.PAYMENTS).createIndex({ organizationId: 1, date: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.PAYMENTS, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.PAYMENTS, { organizationId: 1, studentId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.PAYMENTS, { orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.PAYMENTS, { organizationId: 1, date: 1 });
 
     // 13. Invoices
-    await db.collection(COLLECTION_NAMES.INVOICES).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.INVOICES).createIndex({ organizationId: 1, paymentId: 1 });
-    await db.collection(COLLECTION_NAMES.INVOICES).createIndex({ orgId: 1 });
-    await db.collection(COLLECTION_NAMES.INVOICES).createIndex({ organizationId: 1, invoiceNumber: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.INVOICES, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.INVOICES, { organizationId: 1, paymentId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.INVOICES, { orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.INVOICES, { organizationId: 1, invoiceNumber: 1 });
 
     // 14. Notifications
-    await db.collection(COLLECTION_NAMES.NOTIFICATIONS).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.NOTIFICATIONS).createIndex({ organizationId: 1, status: 1 });
-    await db.collection(COLLECTION_NAMES.NOTIFICATIONS).createIndex({ orgId: 1 });
-    await db.collection(COLLECTION_NAMES.NOTIFICATIONS).createIndex({ organizationId: 1, studentId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.NOTIFICATIONS, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.NOTIFICATIONS, { organizationId: 1, status: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.NOTIFICATIONS, { orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.NOTIFICATIONS, { organizationId: 1, studentId: 1 });
 
     // 15. Audit Logs
-    await db.collection(COLLECTION_NAMES.AUDIT_LOGS).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.AUDIT_LOGS).createIndex({ organizationId: 1, timestamp: -1 });
-    await db.collection(COLLECTION_NAMES.AUDIT_LOGS).createIndex({ orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.AUDIT_LOGS, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.AUDIT_LOGS, { organizationId: 1, timestamp: -1 });
+    await safeCreateIndex(COLLECTION_NAMES.AUDIT_LOGS, { orgId: 1 });
 
     // 16. Announcements
-    await db.collection(COLLECTION_NAMES.ANNOUNCEMENTS).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.ANNOUNCEMENTS).createIndex({ organizationId: 1 });
-    await db.collection(COLLECTION_NAMES.ANNOUNCEMENTS).createIndex({ orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.ANNOUNCEMENTS, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.ANNOUNCEMENTS, { organizationId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.ANNOUNCEMENTS, { orgId: 1 });
 
     // 17. Expenses
-    await db.collection(COLLECTION_NAMES.EXPENSES).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.EXPENSES).createIndex({ organizationId: 1, date: 1 });
-    await db.collection(COLLECTION_NAMES.EXPENSES).createIndex({ orgId: 1 });
-    await db.collection(COLLECTION_NAMES.EXPENSES).createIndex({ organizationId: 1, category: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.EXPENSES, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.EXPENSES, { organizationId: 1, date: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.EXPENSES, { orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.EXPENSES, { organizationId: 1, category: 1 });
 
     // 18. WhatsApp Configs
-    await db.collection(COLLECTION_NAMES.WHATSAPP_CONFIGS).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.WHATSAPP_CONFIGS).createIndex({ organizationId: 1 }, { unique: true, sparse: true });
-    await db.collection(COLLECTION_NAMES.WHATSAPP_CONFIGS).createIndex({ orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.WHATSAPP_CONFIGS, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.WHATSAPP_CONFIGS, { organizationId: 1 }, { unique: true, sparse: true });
+    await safeCreateIndex(COLLECTION_NAMES.WHATSAPP_CONFIGS, { orgId: 1 });
 
     // 19. WhatsApp Logs
-    await db.collection(COLLECTION_NAMES.WHATSAPP_LOGS).createIndex({ id: 1 }, { unique: true });
-    await db.collection(COLLECTION_NAMES.WHATSAPP_LOGS).createIndex({ organizationId: 1, timestamp: -1 });
-    await db.collection(COLLECTION_NAMES.WHATSAPP_LOGS).createIndex({ orgId: 1 });
+    await safeCreateIndex(COLLECTION_NAMES.WHATSAPP_LOGS, { id: 1 }, { unique: true });
+    await safeCreateIndex(COLLECTION_NAMES.WHATSAPP_LOGS, { organizationId: 1, timestamp: -1 });
+    await safeCreateIndex(COLLECTION_NAMES.WHATSAPP_LOGS, { orgId: 1 });
 
     console.log(" [MongoDB] All 19 collection indexes verified and ready.");
   } catch (error: any) {

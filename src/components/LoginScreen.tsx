@@ -237,10 +237,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, darkMo
             </form>
           )}
 
-          {/* Quick Sandbox Credentials (For Testing) */}
+          {/* Quick Super Admin Access */}
           <div className="border-t border-slate-100 pt-5 dark:border-slate-800/80 space-y-3">
             <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
-              Quick Sandbox Logins (Click to autofill)
+              Default Super Admin Access
             </span>
             <div className="grid grid-cols-1 gap-2">
               <button
@@ -253,35 +253,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, darkMo
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-bold text-[11px] text-slate-800 dark:text-slate-200 truncate">Platform Super Admin</h4>
-                  <p className="text-[9px] text-slate-400 font-mono truncate">superadmin@platform.com</p>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => autoFill("admin@athena.com")}
-                className="text-left w-full rounded-xl bg-slate-50 border border-slate-100 hover:border-indigo-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 p-2.5 text-xs flex items-center gap-2.5 transition dark:bg-slate-950 dark:border-slate-800"
-              >
-                <div className="rounded-lg bg-indigo-100 p-1.5 text-indigo-600 dark:bg-indigo-950/40 shrink-0">
-                  <Landmark className="h-4 w-4" />
-                </div>
-                <div className="min-w-0">
-                  <h4 className="font-bold text-[11px] text-slate-800 dark:text-slate-200 truncate">Athena Reading Room Owner</h4>
-                  <p className="text-[9px] text-slate-400 font-mono font-semibold text-indigo-600 dark:text-indigo-400 truncate">admin@athena.com</p>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => autoFill("staff@athena.com")}
-                className="text-left w-full rounded-xl bg-slate-50 border border-slate-100 hover:border-indigo-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 p-2.5 text-xs flex items-center gap-2.5 transition dark:bg-slate-950 dark:border-slate-800"
-              >
-                <div className="rounded-lg bg-indigo-100 p-1.5 text-indigo-600 dark:bg-indigo-950/40 shrink-0">
-                  <UserCheck className="h-4 w-4" />
-                </div>
-                <div className="min-w-0">
-                  <h4 className="font-bold text-[11px] text-slate-800 dark:text-slate-200 truncate">Athena Frontdesk Receptionist</h4>
-                  <p className="text-[9px] text-slate-400 font-mono truncate">algomiantlab pvt.com</p>
+                  <p className="text-[9px] text-slate-400 font-mono truncate">superadmin@platform.com (password: password)</p>
                 </div>
               </button>
             </div>
