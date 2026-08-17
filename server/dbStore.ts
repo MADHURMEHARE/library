@@ -1,8 +1,6 @@
-import fs from "fs";
-import path from "path";
-import { getMongoDb, initializeMongoIndexes } from "./db/mongo";
-import { COLLECTION_NAMES, CollectionName } from "./db/schema";
-import { runMigration } from "./db/migrate";
+import { Filter, Document } from "mongodb";
+import { getMongoDb, getCollection, initializeMongoIndexes } from "./db/mongo";
+import { COLLECTION_NAMES } from "./db/schema";
 import {
   Organization,
   User,
@@ -25,142 +23,158 @@ import {
   WhatsAppLog
 } from "../src/types";
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const LEGACY_DB_FILE = path.join(process.cwd(), "db.json");
-
 /**
- * Multi-Tenant Collection Repository Store
- * Each entity resides in its own discrete Collection / File, completely eliminating monolithic giant document storage.
+ * Multi-Tenant MongoDB Collection Repository
+ * Direct connection to MongoDB Atlas as the single source of truth.
+ * Ensures data persistence, tenant isolation, and atomic operations.
  */
-class CollectionRepository<T extends { id: string; organizationId?: string | null; orgId?: string | null }> {
-  private collectionName: string;
-  private memoryCache: T[] = [];
-  private isLoaded = false;
+export class CollectionRepository<T extends { id: string; organizationId?: string | null; orgId?: string | null }> {
+  public readonly collectionName: string;
 
   constructor(collectionName: string) {
     this.collectionName = collectionName;
   }
 
-  private getFilePath(): string {
-    return path.join(DATA_DIR, `${this.collectionName}.json`);
+  private async getCol() {
+    return await getCollection<T & Document>(this.collectionName);
   }
 
-  public load(): void {
-    try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
+  public async getAll(filter: Filter<T> = {}): Promise<T[]> {
+    const col = await this.getCol();
+    const docs = await col.find(filter, { projection: { _id: 0 } }).toArray();
+    return docs as unknown as T[];
+  }
+
+  public async find(filter: Filter<T> = {}): Promise<T[]> {
+    const col = await this.getCol();
+    const docs = await col.find(filter, { projection: { _id: 0 } }).toArray();
+    return docs as unknown as T[];
+  }
+
+  public async findById(id: string): Promise<T | null> {
+    const col = await this.getCol();
+    const doc = await col.findOne({ id } as any, { projection: { _id: 0 } });
+    return doc ? (doc as unknown as T) : null;
+  }
+
+  public async findOne(filter: Filter<T>): Promise<T | null> {
+    const col = await this.getCol();
+    const doc = await col.findOne(filter, { projection: { _id: 0 } });
+    return doc ? (doc as unknown as T) : null;
+  }
+
+  public async findByOrg(orgId: string, additionalFilter: Filter<T> = {}): Promise<T[]> {
+    const col = await this.getCol();
+    const query: any = {
+      $and: [
+        { $or: [{ organizationId: orgId }, { orgId: orgId }] },
+        additionalFilter
+      ]
+    };
+    const docs = await col.find(query, { projection: { _id: 0 } }).toArray();
+    return docs as unknown as T[];
+  }
+
+  public async findByIdAndOrg(id: string, orgId: string): Promise<T | null> {
+    const col = await this.getCol();
+    const query: any = {
+      id,
+      $or: [{ organizationId: orgId }, { orgId: orgId }]
+    };
+    const doc = await col.findOne(query, { projection: { _id: 0 } });
+    return doc ? (doc as unknown as T) : null;
+  }
+
+  public async insert(doc: T): Promise<T> {
+    const col = await this.getCol();
+    const cleanDoc: any = { ...doc };
+    delete cleanDoc._id;
+
+    // Harmonize organizationId and orgId for tenant isolation compatibility
+    if (cleanDoc.orgId && !cleanDoc.organizationId) {
+      cleanDoc.organizationId = cleanDoc.orgId;
+    } else if (cleanDoc.organizationId && !cleanDoc.orgId) {
+      cleanDoc.orgId = cleanDoc.organizationId;
+    }
+
+    if (!cleanDoc.createdAt) {
+      cleanDoc.createdAt = new Date().toISOString();
+    }
+    cleanDoc.updatedAt = new Date().toISOString();
+
+    await col.updateOne(
+      { id: cleanDoc.id } as any,
+      { $set: cleanDoc },
+      { upsert: true }
+    );
+
+    return cleanDoc as T;
+  }
+
+  public async update(id: string, update: Partial<T>): Promise<T | null> {
+    const col = await this.getCol();
+    const cleanUpdate: any = {};
+    for (const [k, v] of Object.entries(update)) {
+      if (v !== undefined && k !== "_id") {
+        cleanUpdate[k] = v;
       }
+    }
+    cleanUpdate.updatedAt = new Date().toISOString();
 
-      const filePath = this.getFilePath();
-      if (fs.existsSync(filePath)) {
-        const content = fs.readFileSync(filePath, "utf-8");
-        this.memoryCache = JSON.parse(content);
-      } else {
-        this.memoryCache = [];
-        this.persist();
+    await col.updateOne({ id } as any, { $set: cleanUpdate });
+    return this.findById(id);
+  }
+
+  public async updateByOrg(id: string, orgId: string, update: Partial<T>): Promise<T | null> {
+    const col = await this.getCol();
+    const cleanUpdate: any = {};
+    for (const [k, v] of Object.entries(update)) {
+      if (v !== undefined && k !== "_id") {
+        cleanUpdate[k] = v;
       }
-      this.isLoaded = true;
-    } catch (error) {
-      console.error(`Failed to load discrete collection ${this.collectionName}:`, error);
-      this.memoryCache = [];
     }
+    cleanUpdate.updatedAt = new Date().toISOString();
+
+    const query: any = {
+      id,
+      $or: [{ organizationId: orgId }, { orgId: orgId }]
+    };
+
+    await col.updateOne(query, { $set: cleanUpdate });
+    return this.findByIdAndOrg(id, orgId);
   }
 
-  private persist(): void {
-    try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-      }
-      const filePath = this.getFilePath();
-      fs.writeFileSync(filePath, JSON.stringify(this.memoryCache, null, 2), "utf-8");
-    } catch (error) {
-      console.error(`Failed to persist collection ${this.collectionName}:`, error);
-    }
+  public async delete(id: string): Promise<boolean> {
+    const col = await this.getCol();
+    const res = await col.deleteOne({ id } as any);
+    return (res.deletedCount ?? 0) > 0;
   }
 
-  // Dual sync to live MongoDB if available
-  private async syncMongo(doc: T, operation: "upsert" | "delete"): Promise<void> {
-    try {
-      const db = await getMongoDb();
-      if (!db) return;
-      const col = db.collection(this.collectionName);
-      if (operation === "upsert") {
-        const { _id, ...docWithoutId } = doc as any;
-        await col.updateOne({ id: doc.id }, { $set: docWithoutId }, { upsert: true });
-      } else if (operation === "delete") {
-        await col.deleteOne({ id: doc.id });
-      }
-    } catch (err) {
-      console.warn(`[MongoDB Sync] Warning on collection ${this.collectionName}:`, (err as Error).message);
-    }
+  public async deleteByOrg(id: string, orgId: string): Promise<boolean> {
+    const col = await this.getCol();
+    const query: any = {
+      id,
+      $or: [{ organizationId: orgId }, { orgId: orgId }]
+    };
+    const res = await col.deleteOne(query);
+    return (res.deletedCount ?? 0) > 0;
   }
 
-  public getAll(): T[] {
-    if (!this.isLoaded) this.load();
-    return [...this.memoryCache];
+  public async deleteMany(filter: Filter<T>): Promise<number> {
+    const col = await this.getCol();
+    const res = await col.deleteMany(filter);
+    return res.deletedCount ?? 0;
   }
 
-  public findByOrg(orgId: string): T[] {
-    if (!this.isLoaded) this.load();
-    return this.memoryCache.filter(item => {
-      const itemOrg = item.organizationId ?? item.orgId;
-      return itemOrg === orgId;
-    });
-  }
-
-  public findById(id: string): T | undefined {
-    if (!this.isLoaded) this.load();
-    return this.memoryCache.find(item => item.id === id);
-  }
-
-  public insert(doc: T): void {
-    if (!this.isLoaded) this.load();
-    // Ensure both organizationId and orgId are set for backwards compatibility
-    if (doc.orgId && !doc.organizationId) {
-      doc.organizationId = doc.orgId;
-    } else if (doc.organizationId && !doc.orgId) {
-      doc.orgId = doc.organizationId;
-    }
-    this.memoryCache.push(doc);
-    this.persist();
-    this.syncMongo(doc, "upsert");
-  }
-
-  public update(id: string, update: Partial<T>): void {
-    if (!this.isLoaded) this.load();
-    const idx = this.memoryCache.findIndex(item => item.id === id);
-    if (idx !== -1) {
-      const cleanUpdate: any = {};
-      for (const [k, v] of Object.entries(update)) {
-        if (v !== undefined) {
-          cleanUpdate[k] = v;
-        }
-      }
-      this.memoryCache[idx] = { ...this.memoryCache[idx], ...cleanUpdate };
-      this.persist();
-      this.syncMongo(this.memoryCache[idx], "upsert");
-    }
-  }
-
-  public delete(id: string): void {
-    if (!this.isLoaded) this.load();
-    const target = this.memoryCache.find(item => item.id === id);
-    this.memoryCache = this.memoryCache.filter(item => item.id !== id);
-    this.persist();
-    if (target) {
-      this.syncMongo(target, "delete");
-    }
-  }
-
-  public count(filter?: (item: T) => boolean): number {
-    if (!this.isLoaded) this.load();
-    return filter ? this.memoryCache.filter(filter).length : this.memoryCache.length;
+  public async count(filter: Filter<T> = {}): Promise<number> {
+    const col = await this.getCol();
+    return await col.countDocuments(filter);
   }
 }
 
-class DBStore {
-  // 19 Independent Collection Repositories
-  private repos = {
+export class DBStore {
+  // 19 Independent Collection Repositories connected directly to MongoDB Atlas
+  public readonly repos = {
     organizations: new CollectionRepository<Organization>(COLLECTION_NAMES.ORGANIZATIONS),
     users: new CollectionRepository<User>(COLLECTION_NAMES.USERS),
     students: new CollectionRepository<Student>(COLLECTION_NAMES.STUDENTS),
@@ -183,189 +197,223 @@ class DBStore {
   };
 
   public async initialize(): Promise<void> {
+    console.log(" [DBStore] Initializing StudySphere MongoDB Atlas repository layer...");
     try {
-      console.log(" Initializing StudySphere multi-collection database architecture...");
-
-      // Check if legacy monolithic db.json exists and data/ is not yet populated
-      const orgFile = path.join(DATA_DIR, `${COLLECTION_NAMES.ORGANIZATIONS}.json`);
-      if (fs.existsSync(LEGACY_DB_FILE) && (!fs.existsSync(orgFile) || fs.readFileSync(orgFile, "utf-8").trim() === "[]")) {
-        console.log(" Legacy monolithic database detected. Running automated migration to 19 separate collections...");
-        await runMigration();
-      }
-
-      // Load all 19 separate collection repositories
-      Object.values(this.repos).forEach(repo => repo.load());
-
-      // Attempt live MongoDB index initialization if configured
       const db = await getMongoDb();
-      if (db) {
-        await initializeMongoIndexes(db);
-      }
-
-      console.log(" All 19 collections loaded successfully into discrete database models.");
-    } catch (error) {
-      console.error(" Failed to initialize database store:", error);
+      await initializeMongoIndexes(db);
+      console.log(" [DBStore] All 19 MongoDB collections connected & indexes verified successfully.");
+    } catch (error: any) {
+      console.error(" [DBStore] Failed during database initialization:", error.message);
+      throw error;
     }
   }
 
-  public getStatus() {
-    return {
-      connected: "active",
-      type: "Multi-Tenant Discrete Collections",
-      collectionsCount: 19,
-      details: `Active multi-collection storage. Total: ${this.repos.students.count()} students, ${this.repos.organizations.count()} organizations, ${this.repos.seats.count()} seats, ${this.repos.attendances.count()} attendance logs.`
-    };
+  public async getStatus() {
+    try {
+      const [studentsCount, orgsCount, seatsCount, attendancesCount, paymentsCount] = await Promise.all([
+        this.repos.students.count(),
+        this.repos.organizations.count(),
+        this.repos.seats.count(),
+        this.repos.attendances.count(),
+        this.repos.payments.count()
+      ]);
+
+      return {
+        connected: "active",
+        type: "MongoDB Atlas Single Source of Truth",
+        collectionsCount: 19,
+        details: `Active MongoDB Atlas storage. Total: ${studentsCount} students, ${orgsCount} organizations, ${seatsCount} seats, ${attendancesCount} attendance logs, ${paymentsCount} payments.`
+      };
+    } catch (error: any) {
+      return {
+        connected: "error",
+        type: "MongoDB Atlas",
+        collectionsCount: 19,
+        details: `Connection error: ${error.message}`
+      };
+    }
   }
 
   // 1. Organizations
-  public getOrganizations(): Organization[] {
-    return this.repos.organizations.getAll();
+  public async getOrganizations(): Promise<Organization[]> {
+    return await this.repos.organizations.getAll();
   }
-  public getOrganizationById(id: string): Organization | undefined {
-    return this.repos.organizations.findById(id);
+  public async getOrganizationById(id: string): Promise<Organization | null> {
+    return await this.repos.organizations.findById(id);
   }
-  public addOrganization(org: Organization): void {
-    this.repos.organizations.insert(org);
+  public async addOrganization(org: Organization): Promise<Organization> {
+    return await this.repos.organizations.insert(org);
   }
-  public updateOrganization(id: string, update: Partial<Organization>): void {
-    this.repos.organizations.update(id, update);
+  public async updateOrganization(id: string, update: Partial<Organization>): Promise<Organization | null> {
+    return await this.repos.organizations.update(id, update);
   }
-  public deleteOrganization(id: string): void {
-    this.repos.organizations.delete(id);
+  public async deleteOrganization(id: string): Promise<boolean> {
+    return await this.repos.organizations.delete(id);
   }
 
   // 2. Users
-  public getUsers(): User[] {
-    return this.repos.users.getAll();
+  public async getUsers(): Promise<User[]> {
+    return await this.repos.users.getAll();
   }
-  public getUsersByOrg(orgId: string): User[] {
-    return this.repos.users.findByOrg(orgId);
+  public async getUserById(id: string): Promise<User | null> {
+    return await this.repos.users.findById(id);
   }
-  public addUser(user: User): void {
-    this.repos.users.insert(user);
+  public async getUserByEmail(email: string): Promise<User | null> {
+    return await this.repos.users.findOne({ email: (email || "").toLowerCase().trim() } as any);
   }
-  public updateUser(id: string, update: Partial<User>): void {
-    this.repos.users.update(id, update);
+  public async getUsersByOrg(orgId: string): Promise<User[]> {
+    return await this.repos.users.findByOrg(orgId);
+  }
+  public async addUser(user: User): Promise<User> {
+    return await this.repos.users.insert(user);
+  }
+  public async updateUser(id: string, update: Partial<User>): Promise<User | null> {
+    return await this.repos.users.update(id, update);
+  }
+  public async deleteUser(id: string): Promise<boolean> {
+    return await this.repos.users.delete(id);
   }
 
   // 3. Students
-  public getStudents(): Student[] {
-    return this.repos.students.getAll();
+  public async getStudents(): Promise<Student[]> {
+    return await this.repos.students.getAll();
   }
-  public getStudentsByOrg(orgId: string): Student[] {
-    return this.repos.students.findByOrg(orgId);
+  public async getStudentById(id: string): Promise<Student | null> {
+    return await this.repos.students.findById(id);
   }
-  public addStudent(student: Student): void {
-    this.repos.students.insert(student);
+  public async getStudentsByOrg(orgId: string): Promise<Student[]> {
+    return await this.repos.students.findByOrg(orgId);
   }
-  public updateStudent(id: string, update: Partial<Student>): void {
-    this.repos.students.update(id, update);
+  public async addStudent(student: Student): Promise<Student> {
+    return await this.repos.students.insert(student);
   }
-  public deleteStudent(id: string): void {
-    this.repos.students.update(id, { status: "inactive" } as any);
+  public async updateStudent(id: string, update: Partial<Student>): Promise<Student | null> {
+    return await this.repos.students.update(id, update);
   }
-  public permanentlyDeleteStudent(id: string): void {
-    this.repos.students.delete(id);
+  public async deleteStudent(id: string): Promise<boolean> {
+    const updated = await this.repos.students.update(id, { status: "inactive" } as any);
+    return updated !== null;
+  }
+  public async permanentlyDeleteStudent(id: string): Promise<boolean> {
+    return await this.repos.students.delete(id);
   }
 
   // 4. Membership Plans
-  public getPlans(): MembershipPlan[] {
-    return this.repos.membershipPlans.getAll();
+  public async getPlans(): Promise<MembershipPlan[]> {
+    return await this.repos.membershipPlans.getAll();
   }
-  public getPlansByOrg(orgId: string): MembershipPlan[] {
-    return this.repos.membershipPlans.findByOrg(orgId);
+  public async getPlanById(id: string): Promise<MembershipPlan | null> {
+    return await this.repos.membershipPlans.findById(id);
   }
-  public addPlan(plan: MembershipPlan): void {
-    this.repos.membershipPlans.insert(plan);
+  public async getPlansByOrg(orgId: string): Promise<MembershipPlan[]> {
+    return await this.repos.membershipPlans.findByOrg(orgId);
   }
-  public updatePlan(id: string, update: Partial<MembershipPlan>): void {
-    this.repos.membershipPlans.update(id, update);
+  public async addPlan(plan: MembershipPlan): Promise<MembershipPlan> {
+    return await this.repos.membershipPlans.insert(plan);
   }
-  public deletePlan(id: string): void {
-    this.repos.membershipPlans.delete(id);
+  public async updatePlan(id: string, update: Partial<MembershipPlan>): Promise<MembershipPlan | null> {
+    return await this.repos.membershipPlans.update(id, update);
+  }
+  public async deletePlan(id: string): Promise<boolean> {
+    return await this.repos.membershipPlans.delete(id);
   }
 
   // 5. Memberships
-  public getMemberships(): Membership[] {
-    return this.repos.memberships.getAll();
+  public async getMemberships(): Promise<Membership[]> {
+    return await this.repos.memberships.getAll();
   }
-  public getMembershipsByOrg(orgId: string): Membership[] {
-    return this.repos.memberships.findByOrg(orgId);
+  public async getMembershipById(id: string): Promise<Membership | null> {
+    return await this.repos.memberships.findById(id);
   }
-  public addMembership(memb: Membership): void {
-    this.repos.memberships.insert(memb);
+  public async getMembershipsByOrg(orgId: string): Promise<Membership[]> {
+    return await this.repos.memberships.findByOrg(orgId);
   }
-  public updateMembership(id: string, update: Partial<Membership>): void {
-    this.repos.memberships.update(id, update);
+  public async addMembership(memb: Membership): Promise<Membership> {
+    return await this.repos.memberships.insert(memb);
   }
-  public deleteMembership(id: string): void {
-    this.repos.memberships.delete(id);
+  public async updateMembership(id: string, update: Partial<Membership>): Promise<Membership | null> {
+    return await this.repos.memberships.update(id, update);
+  }
+  public async deleteMembership(id: string): Promise<boolean> {
+    return await this.repos.memberships.delete(id);
   }
 
   // 6. Payments
-  public getPayments(): Payment[] {
-    return this.repos.payments.getAll();
+  public async getPayments(): Promise<Payment[]> {
+    return await this.repos.payments.getAll();
   }
-  public getPaymentsByOrg(orgId: string): Payment[] {
-    return this.repos.payments.findByOrg(orgId);
+  public async getPaymentById(id: string): Promise<Payment | null> {
+    return await this.repos.payments.findById(id);
   }
-  public addPayment(payment: Payment): void {
-    this.repos.payments.insert(payment);
+  public async getPaymentsByOrg(orgId: string): Promise<Payment[]> {
+    return await this.repos.payments.findByOrg(orgId);
   }
-  public updatePayment(id: string, update: Partial<Payment>): void {
-    this.repos.payments.update(id, update);
+  public async addPayment(payment: Payment): Promise<Payment> {
+    return await this.repos.payments.insert(payment);
+  }
+  public async updatePayment(id: string, update: Partial<Payment>): Promise<Payment | null> {
+    return await this.repos.payments.update(id, update);
   }
 
   // 7. Invoices
-  public getInvoices(): Invoice[] {
-    return this.repos.invoices.getAll();
+  public async getInvoices(): Promise<Invoice[]> {
+    return await this.repos.invoices.getAll();
   }
-  public getInvoicesByOrg(orgId: string): Invoice[] {
-    return this.repos.invoices.findByOrg(orgId);
+  public async getInvoicesByOrg(orgId: string): Promise<Invoice[]> {
+    return await this.repos.invoices.findByOrg(orgId);
   }
-  public addInvoice(invoice: Invoice): void {
-    this.repos.invoices.insert(invoice);
+  public async addInvoice(invoice: Invoice): Promise<Invoice> {
+    return await this.repos.invoices.insert(invoice);
   }
 
   // 8. Expenses
-  public getExpenses(): Expense[] {
-    return this.repos.expenses.getAll();
+  public async getExpenses(): Promise<Expense[]> {
+    return await this.repos.expenses.getAll();
   }
-  public getExpensesByOrg(orgId: string): Expense[] {
-    return this.repos.expenses.findByOrg(orgId);
+  public async getExpenseById(id: string): Promise<Expense | null> {
+    return await this.repos.expenses.findById(id);
   }
-  public addExpense(expense: Expense): void {
-    this.repos.expenses.insert(expense);
+  public async getExpensesByOrg(orgId: string): Promise<Expense[]> {
+    return await this.repos.expenses.findByOrg(orgId);
   }
-  public deleteExpense(id: string): void {
-    this.repos.expenses.delete(id);
+  public async addExpense(expense: Expense): Promise<Expense> {
+    return await this.repos.expenses.insert(expense);
+  }
+  public async deleteExpense(id: string): Promise<boolean> {
+    return await this.repos.expenses.delete(id);
   }
 
   // 9. Notifications
-  public getNotifications(): Notification[] {
-    return this.repos.notifications.getAll();
+  public async getNotifications(): Promise<Notification[]> {
+    return await this.repos.notifications.getAll();
   }
-  public getNotificationsByOrg(orgId: string): Notification[] {
-    return this.repos.notifications.findByOrg(orgId);
+  public async getNotificationById(id: string): Promise<Notification | null> {
+    return await this.repos.notifications.findById(id);
   }
-  public addNotification(notification: Notification): void {
-    this.repos.notifications.insert(notification);
+  public async getNotificationsByOrg(orgId: string): Promise<Notification[]> {
+    return await this.repos.notifications.findByOrg(orgId);
   }
-  public updateNotification(id: string, update: Partial<Notification>): void {
-    this.repos.notifications.update(id, update);
+  public async addNotification(notification: Notification): Promise<Notification> {
+    return await this.repos.notifications.insert(notification);
+  }
+  public async updateNotification(id: string, update: Partial<Notification>): Promise<Notification | null> {
+    return await this.repos.notifications.update(id, update);
   }
 
   // 10. WhatsApp Configs
-  public getWhatsAppConfigs(): WhatsAppConfig[] {
-    return this.repos.whatsappConfigs.getAll();
+  public async getWhatsAppConfigs(): Promise<WhatsAppConfig[]> {
+    return await this.repos.whatsappConfigs.getAll();
   }
-  public getWhatsAppConfigByOrg(orgId: string): WhatsAppConfig | undefined {
-    return this.repos.whatsappConfigs.findByOrg(orgId)[0];
+  public async getWhatsAppConfigByOrg(orgId: string): Promise<WhatsAppConfig | null> {
+    const list = await this.repos.whatsappConfigs.findByOrg(orgId);
+    return list.length > 0 ? list[0] : null;
   }
-  public updateWhatsAppConfig(orgId: string, update: Partial<WhatsAppConfig>): void {
-    const existing = this.getWhatsAppConfigByOrg(orgId);
+  public async updateWhatsAppConfig(orgId: string, update: Partial<WhatsAppConfig>): Promise<WhatsAppConfig> {
+    const existing = await this.getWhatsAppConfigByOrg(orgId);
     if (existing) {
-      this.repos.whatsappConfigs.update(existing.id, update);
+      await this.repos.whatsappConfigs.update(existing.id, update);
+      const updated = await this.getWhatsAppConfigByOrg(orgId);
+      return updated!;
     } else {
       const newConfig: WhatsAppConfig = {
         id: `wac-${Date.now()}`,
@@ -383,133 +431,154 @@ class DBStore {
         },
         triggerDaysBefore: update.triggerDaysBefore ?? 3
       };
-      this.repos.whatsappConfigs.insert(newConfig);
+      return await this.repos.whatsappConfigs.insert(newConfig);
     }
   }
 
   // 11. WhatsApp Logs
-  public getWhatsAppLogs(): WhatsAppLog[] {
-    return this.repos.whatsappLogs.getAll();
+  public async getWhatsAppLogs(): Promise<WhatsAppLog[]> {
+    return await this.repos.whatsappLogs.getAll();
   }
-  public getWhatsAppLogsByOrg(orgId: string): WhatsAppLog[] {
-    return this.repos.whatsappLogs.findByOrg(orgId);
+  public async getWhatsAppLogsByOrg(orgId: string): Promise<WhatsAppLog[]> {
+    return await this.repos.whatsappLogs.findByOrg(orgId);
   }
-  public addWhatsAppLog(log: WhatsAppLog): void {
-    this.repos.whatsappLogs.insert(log);
+  public async addWhatsAppLog(log: WhatsAppLog): Promise<WhatsAppLog> {
+    return await this.repos.whatsappLogs.insert(log);
   }
 
   // 12. Audit Logs
-  public getAuditLogs(): AuditLog[] {
-    return this.repos.auditLogs.getAll();
+  public async getAuditLogs(): Promise<AuditLog[]> {
+    return await this.repos.auditLogs.getAll();
   }
-  public getAuditLogsByOrg(orgId: string | null): AuditLog[] {
-    if (!orgId) return this.repos.auditLogs.getAll();
-    return this.repos.auditLogs.getAll().filter(l => (l.orgId ?? (l as any).organizationId) === orgId);
+  public async getAuditLogsByOrg(orgId: string | null): Promise<AuditLog[]> {
+    if (!orgId) return await this.repos.auditLogs.getAll();
+    return await this.repos.auditLogs.find({
+      $or: [{ organizationId: orgId }, { orgId: orgId }]
+    } as any);
   }
-  public addAuditLog(log: AuditLog): void {
-    this.repos.auditLogs.insert(log);
+  public async addAuditLog(log: AuditLog): Promise<AuditLog> {
+    return await this.repos.auditLogs.insert(log);
   }
 
   // 13. Announcements
-  public getAnnouncements(): Announcement[] {
-    return this.repos.announcements.getAll();
+  public async getAnnouncements(): Promise<Announcement[]> {
+    return await this.repos.announcements.getAll();
   }
-  public getAnnouncementsByOrg(orgId: string | null): Announcement[] {
-    return this.repos.announcements.getAll().filter(a => {
-      const aOrg = a.orgId ?? (a as any).organizationId;
-      return aOrg === null || aOrg === undefined || aOrg === orgId;
-    });
+  public async getAnnouncementById(id: string): Promise<Announcement | null> {
+    return await this.repos.announcements.findById(id);
   }
-  public addAnnouncement(announcement: Announcement): void {
-    this.repos.announcements.insert(announcement);
+  public async getAnnouncementsByOrg(orgId: string | null): Promise<Announcement[]> {
+    if (!orgId) return await this.repos.announcements.getAll();
+    return await this.repos.announcements.find({
+      $or: [
+        { organizationId: null },
+        { orgId: null },
+        { organizationId: orgId },
+        { orgId: orgId },
+        { organizationId: { $exists: false } }
+      ]
+    } as any);
   }
-  public deleteAnnouncement(id: string): void {
-    this.repos.announcements.delete(id);
+  public async addAnnouncement(announcement: Announcement): Promise<Announcement> {
+    return await this.repos.announcements.insert(announcement);
+  }
+  public async deleteAnnouncement(id: string): Promise<boolean> {
+    return await this.repos.announcements.delete(id);
   }
 
   // 14. Buildings
-  public getBuildings(): Building[] {
-    return this.repos.buildings.getAll();
+  public async getBuildings(): Promise<Building[]> {
+    return await this.repos.buildings.getAll();
   }
-  public getBuildingsByOrg(orgId: string): Building[] {
-    return this.repos.buildings.findByOrg(orgId);
+  public async getBuildingsByOrg(orgId: string): Promise<Building[]> {
+    return await this.repos.buildings.findByOrg(orgId);
   }
-  public addBuilding(bld: Building): void {
-    this.repos.buildings.insert(bld);
+  public async addBuilding(bld: Building): Promise<Building> {
+    return await this.repos.buildings.insert(bld);
   }
-  public deleteBuilding(id: string): void {
-    this.repos.buildings.delete(id);
+  public async deleteBuilding(id: string): Promise<boolean> {
+    return await this.repos.buildings.delete(id);
   }
 
   // 15. Floors
-  public getFloors(): Floor[] {
-    return this.repos.floors.getAll();
+  public async getFloors(): Promise<Floor[]> {
+    return await this.repos.floors.getAll();
   }
-  public getFloorsByOrg(orgId: string): Floor[] {
-    return this.repos.floors.findByOrg(orgId);
+  public async getFloorsByOrg(orgId: string): Promise<Floor[]> {
+    return await this.repos.floors.findByOrg(orgId);
   }
-  public addFloor(flr: Floor): void {
-    this.repos.floors.insert(flr);
+  public async addFloor(flr: Floor): Promise<Floor> {
+    return await this.repos.floors.insert(flr);
   }
-  public deleteFloor(id: string): void {
-    this.repos.floors.delete(id);
+  public async deleteFloor(id: string): Promise<boolean> {
+    return await this.repos.floors.delete(id);
   }
 
   // 16. Rooms
-  public getRooms(): Room[] {
-    return this.repos.rooms.getAll();
+  public async getRooms(): Promise<Room[]> {
+    return await this.repos.rooms.getAll();
   }
-  public getRoomsByOrg(orgId: string): Room[] {
-    return this.repos.rooms.findByOrg(orgId);
+  public async getRoomById(id: string): Promise<Room | null> {
+    return await this.repos.rooms.findById(id);
   }
-  public addRoom(rm: Room): void {
-    this.repos.rooms.insert(rm);
+  public async getRoomsByOrg(orgId: string): Promise<Room[]> {
+    return await this.repos.rooms.findByOrg(orgId);
   }
-  public deleteRoom(id: string): void {
-    this.repos.rooms.delete(id);
+  public async addRoom(rm: Room): Promise<Room> {
+    return await this.repos.rooms.insert(rm);
+  }
+  public async deleteRoom(id: string): Promise<boolean> {
+    return await this.repos.rooms.delete(id);
   }
 
   // 17. Seats
-  public getSeats(): Seat[] {
-    return this.repos.seats.getAll();
+  public async getSeats(): Promise<Seat[]> {
+    return await this.repos.seats.getAll();
   }
-  public getSeatsByOrg(orgId: string): Seat[] {
-    return this.repos.seats.findByOrg(orgId);
+  public async getSeatById(id: string): Promise<Seat | null> {
+    return await this.repos.seats.findById(id);
   }
-  public addSeat(seat: Seat): void {
-    this.repos.seats.insert(seat);
+  public async getSeatsByOrg(orgId: string): Promise<Seat[]> {
+    return await this.repos.seats.findByOrg(orgId);
   }
-  public updateSeat(id: string, update: Partial<Seat>): void {
-    this.repos.seats.update(id, update);
+  public async addSeat(seat: Seat): Promise<Seat> {
+    return await this.repos.seats.insert(seat);
   }
-  public deleteSeat(id: string): void {
-    this.repos.seats.delete(id);
+  public async updateSeat(id: string, update: Partial<Seat>): Promise<Seat | null> {
+    return await this.repos.seats.update(id, update);
+  }
+  public async deleteSeat(id: string): Promise<boolean> {
+    return await this.repos.seats.delete(id);
   }
 
   // 18. Seat History
-  public getSeatHistory(): SeatAssignmentHistory[] {
-    return this.repos.seatHistory.getAll();
+  public async getSeatHistory(): Promise<SeatAssignmentHistory[]> {
+    return await this.repos.seatHistory.getAll();
   }
-  public getSeatHistoryByOrg(orgId: string): SeatAssignmentHistory[] {
-    return this.repos.seatHistory.findByOrg(orgId);
+  public async getSeatHistoryByOrg(orgId: string): Promise<SeatAssignmentHistory[]> {
+    return await this.repos.seatHistory.findByOrg(orgId);
   }
-  public addSeatHistory(sh: SeatAssignmentHistory): void {
-    this.repos.seatHistory.insert(sh);
+  public async addSeatHistory(sh: SeatAssignmentHistory): Promise<SeatAssignmentHistory> {
+    return await this.repos.seatHistory.insert(sh);
   }
 
   // 19. Attendances
-  public getAttendances(): Attendance[] {
-    return this.repos.attendances.getAll();
+  public async getAttendances(): Promise<Attendance[]> {
+    return await this.repos.attendances.getAll();
   }
-  public getAttendancesByOrg(orgId: string): Attendance[] {
-    return this.repos.attendances.findByOrg(orgId);
+  public async getAttendancesByOrg(orgId: string, date?: string): Promise<Attendance[]> {
+    if (date) {
+      return await this.repos.attendances.findByOrg(orgId, { date } as any);
+    }
+    return await this.repos.attendances.findByOrg(orgId);
   }
-  public addAttendance(attendance: Attendance): void {
-    this.repos.attendances.insert(attendance);
+  public async addAttendance(attendance: Attendance): Promise<Attendance> {
+    return await this.repos.attendances.insert(attendance);
   }
-  public updateAttendance(id: string, update: Partial<Attendance>): void {
-    this.repos.attendances.update(id, update);
+  public async updateAttendance(id: string, update: Partial<Attendance>): Promise<Attendance | null> {
+    return await this.repos.attendances.update(id, update);
   }
 }
 
 export const dbStore = new DBStore();
+
