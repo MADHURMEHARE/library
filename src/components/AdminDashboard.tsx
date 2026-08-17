@@ -54,7 +54,8 @@ import {
   UserPlus,
   ArrowRightLeft,
   SlidersHorizontal,
-  Building2
+  Building2,
+  Loader2
 } from "lucide-react";
 import {
   Student,
@@ -135,7 +136,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setCameraError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" }
+        video: {
+          facingMode: "user",
+          width: { ideal: 1280, min: 640 },
+          height: { ideal: 960, min: 480 }
+        }
       });
       setCameraStream(stream);
       setCameraActive(true);
@@ -165,12 +170,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleCapturePhoto = () => {
     if (videoRef.current) {
       const canvas = document.createElement("canvas");
-      canvas.width = videoRef.current.videoWidth || 640;
-      canvas.height = videoRef.current.videoHeight || 480;
-      const ctx = canvas.getContext("2d");
+      const videoWidth = videoRef.current.videoWidth || 1280;
+      const videoHeight = videoRef.current.videoHeight || 960;
+      canvas.width = videoWidth;
+      canvas.height = videoHeight;
+      const ctx = canvas.getContext("2d", { alpha: false });
       if (ctx) {
-        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-        const base64Photo = canvas.toDataURL("image/jpeg");
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(videoRef.current, 0, 0, videoWidth, videoHeight);
+        const base64Photo = canvas.toDataURL("image/jpeg", 0.95);
         setStudentForm(prev => ({ ...prev, photo: base64Photo }));
         stopCamera();
       }
@@ -434,6 +443,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const [isQuickSetupLoading, setIsQuickSetupLoading] = useState(false);
 
+  // Modal Submitting States for Double Click Protection
+  const [submittingStudent, setSubmittingStudent] = useState(false);
+  const [submittingPlan, setSubmittingPlan] = useState(false);
+  const [submittingMembership, setSubmittingMembership] = useState(false);
+  const [submittingExpense, setSubmittingExpense] = useState(false);
+  const [submittingRoom, setSubmittingRoom] = useState(false);
+  const [submittingSingleSeat, setSubmittingSingleSeat] = useState(false);
+  const [submittingBatchSeat, setSubmittingBatchSeat] = useState(false);
+  const [submittingAssignSeat, setSubmittingAssignSeat] = useState(false);
+  const [submittingEditSeat, setSubmittingEditSeat] = useState(false);
+  const [submittingTransferSeat, setSubmittingTransferSeat] = useState(false);
+
   // Attendance scanner simulator
   const [qrCodeInput, setQrCodeInput] = useState("");
   const [attendanceMessage, setAttendanceMessage] = useState<string | null>(null);
@@ -641,6 +662,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Form Submissions
   const handleCreateStudent = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingStudent) return;
     if (!studentForm.name || !studentForm.phone) {
       Swal.fire({
         icon: "warning",
@@ -652,6 +674,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return;
     }
 
+    setSubmittingStudent(true);
     try {
       if (editingStudentId) {
         await apiCall(`/api/students/${editingStudentId}`, "PUT", {
@@ -695,13 +718,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
         color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
       });
+    } finally {
+      setSubmittingStudent(false);
     }
   };
 
   const handleCreatePlan = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingPlan) return;
     if (!planForm.name || !planForm.price) return;
 
+    setSubmittingPlan(true);
     try {
       if (editingPlanId) {
         await apiCall(`/api/plans/${editingPlanId}`, "PUT", {
@@ -747,6 +774,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
         color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
       });
+    } finally {
+      setSubmittingPlan(false);
     }
   };
 
@@ -804,6 +833,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleCreateMembership = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingMembership) return;
     const { studentId, planId, startDate, endDate, paidAmount, paymentMethod, discount, couponCode, notes, assignSeatId, status } = membershipForm;
     if (!studentId || !planId || !startDate || !paidAmount) {
       Swal.fire({
@@ -819,6 +849,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const plan = plans.find(p => p.id === planId);
     if (!plan) return;
 
+    setSubmittingMembership(true);
     try {
       if (editingMembershipId) {
         await apiCall(`/api/memberships/${editingMembershipId}`, "PUT", {
@@ -883,6 +914,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
         color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
       });
+    } finally {
+      setSubmittingMembership(false);
     }
   };
 
@@ -944,8 +977,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleCreateExpense = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingExpense) return;
     if (!expenseForm.title || !expenseForm.amount) return;
 
+    setSubmittingExpense(true);
     try {
       await apiCall("/api/expenses", "POST", {
         ...expenseForm,
@@ -973,6 +1008,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
         color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
       });
+    } finally {
+      setSubmittingExpense(false);
     }
   };
 
@@ -1241,7 +1278,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRoom) return;
     if (!roomNameInput.trim()) return;
+
+    setSubmittingRoom(true);
     try {
       await apiCall("/api/layout/rooms", "POST", {
         orgId: organization.id,
@@ -1267,6 +1307,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
         color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
       });
+    } finally {
+      setSubmittingRoom(false);
     }
   };
 
@@ -1315,7 +1357,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleCreateSingleSeat = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingSingleSeat) return;
     if (!seatForm.seatNumber.trim()) return;
+
+    setSubmittingSingleSeat(true);
     try {
       await apiCall("/api/seats", "POST", {
         orgId: organization.id,
@@ -1345,11 +1390,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
         color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
       });
+    } finally {
+      setSubmittingSingleSeat(false);
     }
   };
 
   const handleBatchCreateSeats = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingBatchSeat) return;
+
+    setSubmittingBatchSeat(true);
     try {
       const res = await apiCall("/api/seats/batch", "POST", {
         orgId: organization.id,
@@ -1380,6 +1430,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
         color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
       });
+    } finally {
+      setSubmittingBatchSeat(false);
     }
   };
 
@@ -1425,7 +1477,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleEditSeatSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingEditSeat) return;
     if (!editSeatForm.id) return;
+
+    setSubmittingEditSeat(true);
     try {
       const updated = await apiCall(`/api/seats/${editSeatForm.id}`, "PUT", {
         seatNumber: editSeatForm.seatNumber,
@@ -1453,12 +1508,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
         color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
       });
+    } finally {
+      setSubmittingEditSeat(false);
     }
   };
 
   const handleAssignStudentToSeat = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingAssignSeat) return;
     if (!selectedSeat || !assignStudentId) return;
+
+    setSubmittingAssignSeat(true);
     try {
       await apiCall("/api/seats/actions", "POST", {
         action: "assign",
@@ -1489,6 +1549,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
         color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
       });
+    } finally {
+      setSubmittingAssignSeat(false);
     }
   };
 
@@ -1838,305 +1900,465 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     <div className={`min-h-screen flex flex-col ${darkMode ? "dark bg-slate-950 text-slate-100" : "bg-slate-50 text-slate-800"}`}>
       
       {/* Top Header Section (No Print) */}
-     <header className="sticky top-0 z-40 bg-white border-b border-slate-200 dark:bg-slate-900 dark:border-slate-800 px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-3 shadow-sm no-print">
-  <div className="flex items-center gap-3 min-w-0">
-    <button
-      onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-      className="shrink-0 md:hidden rounded-lg p-2 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 transition"
-      aria-label="Toggle navigation menu"
-      aria-expanded={mobileMenuOpen}
-    >
-      {mobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
-    </button>
+      <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200/90 dark:bg-slate-900/95 dark:border-slate-800/90 px-4 sm:px-6 py-3 flex items-center justify-between gap-3 shadow-xs no-print h-16">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="shrink-0 md:hidden rounded-lg p-2 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 transition"
+            aria-label="Toggle navigation menu"
+            aria-expanded={mobileMenuOpen}
+          >
+            {mobileMenuOpen ? <X className="h-4 w-4 text-indigo-600" /> : <Menu className="h-4 w-4" />}
+          </button>
 
-    {organization.logo ? (
-      <img
-        src={organization.logo}
-        alt={organization.name}
-        referrerPolicy="no-referrer"
-        className="h-9 w-9 shrink-0 rounded-lg object-cover ring-1 ring-slate-200 dark:ring-slate-800"
-      />
-    ) : (
-      <div className="h-9 w-9 shrink-0 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-display font-bold text-lg shadow-sm">
-        {organization.name.substring(0, 1)}
-      </div>
-    )}
+          {organization.logo ? (
+            <img
+              src={organization.logo}
+              alt={organization.name}
+              referrerPolicy="no-referrer"
+              className="h-9 w-9 shrink-0 rounded-lg object-cover ring-1 ring-slate-200 dark:ring-slate-800"
+            />
+          ) : (
+            <div className="h-9 w-9 shrink-0 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-display font-bold text-lg shadow-sm">
+              {organization.name.substring(0, 1)}
+            </div>
+          )}
 
-    <div className="min-w-0">
-      <h1 className="font-display text-sm sm:text-base font-bold tracking-tight text-slate-900 dark:text-white truncate">
-        {organization.name}
-      </h1>
-      <span className="hidden sm:block text-[10px] text-slate-400 dark:text-slate-500 font-semibold tracking-wider uppercase">
-        Reading Room Workspace
-      </span>
-    </div>
-  </div>
+          <div className="min-w-0">
+            <h1 className="font-display text-sm sm:text-base font-bold tracking-tight text-slate-900 dark:text-white truncate">
+              {organization.name}
+            </h1>
+            <span className="hidden sm:block text-[10px] text-slate-400 dark:text-slate-500 font-semibold tracking-wider uppercase">
+              Reading Room Workspace
+            </span>
+          </div>
+        </div>
 
-  {/* Header Action Buttons */}
-  <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-    {/* Database Status Indicator */}
-    <div
-      title={dbStatus.details}
-      className={`hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[10px] font-mono font-bold uppercase tracking-wider ${
-        dbStatus.connected === "cloud"
-          ? "bg-emerald-50/80 border-emerald-200 text-emerald-700 dark:bg-emerald-950/20 dark:border-emerald-900/50 dark:text-emerald-400"
-          : dbStatus.connected === "error"
-          ? "bg-rose-50/80 border-rose-200 text-rose-700 dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400 cursor-help"
-          : "bg-slate-50 border-slate-200 text-slate-600 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400"
-      }`}
-    >
-      <span className={`h-1.5 w-1.5 rounded-full ${
-        dbStatus.connected === "cloud"
-          ? "bg-emerald-500 animate-pulse"
-          : dbStatus.connected === "error"
-          ? "bg-rose-500 animate-ping"
-          : "bg-slate-400"
-      }`} />
-      <span>{dbStatus.type === "JSON Local File" ? "LOCAL" : dbStatus.type} {dbStatus.connected === "error" ? "FAIL" : ""}</span>
-    </div>
+        {/* Header Action Buttons */}
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          {/* Database Status Indicator */}
+          <div
+            title={dbStatus.details}
+            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-mono font-bold uppercase tracking-wider ${
+              dbStatus.connected === "cloud"
+                ? "bg-emerald-50/80 border-emerald-200 text-emerald-700 dark:bg-emerald-950/20 dark:border-emerald-900/50 dark:text-emerald-400"
+                : dbStatus.connected === "error"
+                ? "bg-rose-50/80 border-rose-200 text-rose-700 dark:bg-rose-950/20 dark:border-rose-900/50 dark:text-rose-400 cursor-help"
+                : "bg-slate-50 border-slate-200 text-slate-600 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400"
+            }`}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${
+              dbStatus.connected === "cloud"
+                ? "bg-emerald-500 animate-pulse"
+                : dbStatus.connected === "error"
+                ? "bg-rose-500 animate-ping"
+                : "bg-slate-400"
+            }`} />
+            <span>{dbStatus.type === "JSON Local File" ? "LOCAL" : dbStatus.type} {dbStatus.connected === "error" ? "FAIL" : ""}</span>
+          </div>
 
-    {/* Mobile-only status dot, no label */}
-    <div
-      title={dbStatus.details}
-      className={`sm:hidden h-2.5 w-2.5 rounded-full shrink-0 ${
-        dbStatus.connected === "cloud"
-          ? "bg-emerald-500 animate-pulse"
-          : dbStatus.connected === "error"
-          ? "bg-rose-500 animate-ping"
-          : "bg-slate-400"
-      }`}
-    />
+          {/* Mobile-only status dot, no label */}
+          <div
+            title={dbStatus.details}
+            className={`sm:hidden h-2.5 w-2.5 rounded-full shrink-0 ${
+              dbStatus.connected === "cloud"
+                ? "bg-emerald-500 animate-pulse"
+                : dbStatus.connected === "error"
+                ? "bg-rose-500 animate-ping"
+                : "bg-slate-400"
+            }`}
+          />
 
-    <button
-      onClick={() => setDarkMode(!darkMode)}
-      className="rounded-lg p-2 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 transition"
-      aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
-    >
-      {darkMode ? <Sun className="h-4 w-4 text-amber-500" /> : <Moon className="h-4 w-4" />}
-    </button>
+          <button
+            onClick={() => setDarkMode(!darkMode)}
+            className="rounded-lg p-2 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900 transition"
+            aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            {darkMode ? <Sun className="h-4 w-4 text-amber-500" /> : <Moon className="h-4 w-4" />}
+          </button>
 
-    <div className="hidden md:flex flex-col items-end text-xs max-w-[9rem]">
-      <span className="font-semibold text-slate-800 dark:text-slate-200 truncate w-full text-right">{currentUser.name}</span>
-      <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-mono font-semibold uppercase">
-        {currentUser.role.replace(/_/g, " ")}
-      </span>
-    </div>
+          <div className="hidden md:flex flex-col items-end text-xs max-w-[9rem]">
+            <span className="font-semibold text-slate-800 dark:text-slate-200 truncate w-full text-right">{currentUser.name}</span>
+            <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-mono font-semibold uppercase">
+              {currentUser.role.replace(/_/g, " ")}
+            </span>
+          </div>
 
-    <button
-      onClick={onLogout}
-      className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-rose-950/30 dark:hover:border-rose-900/60 dark:hover:text-rose-400 dark:focus-visible:ring-offset-slate-900 transition"
-      aria-label="Log out"
-    >
-      <LogOut className="h-3.5 w-3.5" />
-      <span className="hidden sm:inline">Logout</span>
-    </button>
-  </div>
-</header>
+          <button
+            onClick={onLogout}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-rose-950/30 dark:hover:border-rose-900/60 dark:hover:text-rose-400 dark:focus-visible:ring-offset-slate-900 transition"
+            aria-label="Log out"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Logout</span>
+          </button>
+        </div>
+      </header>
 
       {/* Main Workspace Frame */}
-      <div className="flex-1 flex flex-col md:flex-row max-w-[1440px] mx-auto w-full">
+      <div className="flex-1 flex flex-col md:flex-row max-w-[1440px] mx-auto w-full relative">
         
         {/* Backdrop for mobile menu */}
         {mobileMenuOpen && (
           <div
             onClick={() => setMobileMenuOpen(false)}
-            className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-xs md:hidden"
+            className="fixed inset-0 top-16 z-40 bg-slate-900/60 backdrop-blur-xs md:hidden transition-opacity duration-300"
             aria-hidden="true"
           />
         )}
 
         {/* Workspace Sidebar Rails (No Print) */}
-        <nav className={`fixed md:static inset-y-0 left-0 z-50 w-64 border-r border-slate-200 bg-white p-4 space-y-1.5 dark:bg-slate-900 dark:border-slate-800 no-print transform md:transform-none transition-transform duration-300 ease-in-out ${
-          mobileMenuOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
-        }`}>
+        <nav
+          className={`fixed md:sticky top-16 bottom-0 left-0 z-50 md:z-30 w-72 sm:w-80 max-w-[85vw] md:w-72 shrink-0 h-[calc(100dvh-4rem)] md:h-[calc(100vh-4rem)] border-r border-slate-200/90 bg-white/98 dark:bg-slate-900/98 backdrop-blur-md dark:border-slate-800/90 no-print flex flex-col justify-between transform md:transform-none transition-transform duration-300 ease-in-out shadow-2xl md:shadow-none overflow-hidden overscroll-contain ${
+            mobileMenuOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+          }`}
+          aria-label="Sidebar navigation"
+        >
           
-          <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest px-3 block mb-2">
-            MAIN WORKSPACE
-          </span>
-
-          <button
-            onClick={() => { setActiveTab("dashboard"); setMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
-              activeTab === "dashboard"
-                ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
-                : "text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
-            }`}
-          >
-            <LayoutDashboard className="h-4 w-4" />
-            <span>Dashboard Panel</span>
-          </button>
-
-          <button
-            onClick={() => { setActiveTab("students"); setMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
-              activeTab === "students"
-                ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
-                : "text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
-            }`}
-          >
-            <Users className="h-4 w-4" />
-            <span>Students Directory</span>
-          </button>
-
-          <button
-            onClick={() => { setActiveTab("seats"); setMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
-              activeTab === "seats"
-                ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
-                : "text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
-            }`}
-          >
-            <Grid className="h-4 w-4" />
-            <span>Visual Seat Maps</span>
-          </button>
-
-          <button
-            onClick={() => { setActiveTab("memberships"); setMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
-              activeTab === "memberships"
-                ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
-                : "text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
-            }`}
-          >
-            <Briefcase className="h-4 w-4" />
-            <span>Plans & Renewals</span>
-          </button>
-
-          <button
-            onClick={() => { setActiveTab("attendance"); setMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
-              activeTab === "attendance"
-                ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
-                : "text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
-            }`}
-          >
-            <Calendar className="h-4 w-4" />
-            <span>Attendance Logs</span>
-          </button>
-
-          <button
-            onClick={() => { setActiveTab("payments"); setMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
-              activeTab === "payments"
-                ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
-                : "text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
-            }`}
-          >
-            <CreditCard className="h-4 w-4" />
-            <span>Cashier & Expense</span>
-          </button>
-
-          <button
-            onClick={() => { setActiveTab("reports"); setMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
-              activeTab === "reports"
-                ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
-                : "text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
-            }`}
-          >
-            <TrendingUp className="h-4 w-4" />
-            <span>Business Reports</span>
-          </button>
-
-          <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest px-3 block pt-4 mb-2">
-            ALERTS &amp; TASKS
-          </span>
-
-          <button
-            onClick={() => { setActiveTab("expiring"); setMobileMenuOpen(false); }}
-            className={`w-full flex items-center justify-between rounded-lg px-3 py-2 text-xs font-semibold transition ${
-              activeTab === "expiring"
-                ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
-                : "text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <Clock className="h-4 w-4" />
-              <span>Expiring Soon</span>
-            </div>
-            {expiringMemberships.length > 0 && (
-              <span className="rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-[9px] font-bold dark:bg-amber-950/60 dark:text-amber-400">
-                {expiringMemberships.length}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => { setActiveTab("pending_actions"); setMobileMenuOpen(false); }}
-            className={`w-full flex items-center justify-between rounded-lg px-3 py-2 text-xs font-semibold transition ${
-              activeTab === "pending_actions"
-                ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
-                : "text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <AlertCircle className="h-4 w-4" />
-              <span>Pending Actions</span>
-            </div>
-            {pendingActions.length > 0 && (
-              <span className="rounded-full bg-rose-100 text-rose-800 px-2 py-0.5 text-[9px] font-bold dark:bg-rose-950/60 dark:text-rose-400">
-                {pendingActions.length}
-              </span>
-            )}
-          </button>
-
-          <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest px-3 block pt-4 mb-2">
-            MANAGEMENT
-          </span>
-
-          {currentUser.role !== "RECEPTIONIST" && (
-            <button
-              onClick={() => { setActiveTab("whatsapp"); setMobileMenuOpen(false); }}
-              className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
-                activeTab === "whatsapp"
-                  ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
-                  : "text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
-              }`}
-            >
-              <MessageSquare className="h-4 w-4" />
-              <span>WhatsApp &amp; Renewal</span>
-            </button>
-          )}
-
-          <button
-            onClick={() => { setActiveTab("logs"); setMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
-              activeTab === "logs"
-                ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
-                : "text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
-            }`}
-          >
-            <Activity className="h-4 w-4" />
-            <span>Audit Action Log</span>
-          </button>
-
-          {currentUser.role !== "RECEPTIONIST" && (
-            <button
-              onClick={() => { setActiveTab("settings"); setMobileMenuOpen(false); }}
-              className={`w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition ${
-                activeTab === "settings"
-                  ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400"
-                  : "text-slate-500 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-800"
-              }`}
-            >
-              <SettingsIcon className="h-4 w-4" />
-              <span>Workspace Settings</span>
-            </button>
-          )}
-
-          {/* Quick Notice Banner */}
-          <div className="pt-6">
-            <div className="rounded-xl bg-slate-50 border border-slate-100 p-3 dark:bg-slate-950 dark:border-slate-800">
-              <span className="text-[9px] font-bold text-indigo-600 dark:text-indigo-400 tracking-wider block uppercase">Notice Board</span>
-              {announcements.length > 0 ? (
-                <div className="mt-1.5 space-y-2">
-                  <h4 className="text-[11px] font-bold text-slate-800 dark:text-slate-200 line-clamp-1">{announcements[0].title}</h4>
-                  <p className="text-[10px] text-slate-500 line-clamp-2 leading-normal">{announcements[0].content}</p>
+          {/* Scrollable Navigation Items */}
+          <div className="flex-1 overflow-y-auto p-3.5 space-y-5 overscroll-contain">
+            
+            {/* Mobile Header Inside Drawer */}
+            <div className="pb-3 border-b border-slate-100 dark:border-slate-800 md:hidden space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  {organization.logo ? (
+                    <img
+                      src={organization.logo}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      className="h-8 w-8 rounded-lg object-cover ring-1 ring-slate-200 dark:ring-slate-700 shrink-0"
+                    />
+                  ) : (
+                    <div className="h-8 w-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-xs shrink-0">
+                      {organization.name.substring(0, 1)}
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <span className="font-bold text-xs text-slate-800 dark:text-slate-100 truncate block">
+                      {organization.name}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-medium">Workspace Menu</span>
+                  </div>
                 </div>
-              ) : (
-                <p className="text-[10px] text-slate-400 mt-1">No alerts posted.</p>
-              )}
+                <button
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-slate-200 transition"
+                  aria-label="Close menu"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* Logged in User Pill on Mobile Drawer */}
+              <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/60 p-2 rounded-xl border border-slate-100 dark:border-slate-700/50">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="h-6 w-6 rounded-full bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[10px] font-bold shrink-0">
+                    {currentUser.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">{currentUser.name}</p>
+                    <p className="text-[9px] font-mono text-indigo-600 dark:text-indigo-400 uppercase font-semibold">
+                      {currentUser.role.replace(/_/g, " ")}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={onLogout}
+                  title="Logout"
+                  className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition text-xs font-semibold"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
+
+            {/* SECTION 1: CORE WORKSPACE */}
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest px-3 block mb-1.5 font-mono">
+                Workspace
+              </span>
+              <div className="space-y-1">
+                <button
+                  onClick={() => { setActiveTab("dashboard"); setMobileMenuOpen(false); }}
+                  className={`w-full min-h-[44px] flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition ${
+                    activeTab === "dashboard"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/70 dark:hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <LayoutDashboard className={`h-4 w-4 shrink-0 ${activeTab === "dashboard" ? "text-white" : "text-slate-400 dark:text-slate-400"}`} />
+                    <span>Overview &amp; Desk</span>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab("students"); setMobileMenuOpen(false); }}
+                  className={`w-full min-h-[44px] flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition ${
+                    activeTab === "students"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/70 dark:hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Users className={`h-4 w-4 shrink-0 ${activeTab === "students" ? "text-white" : "text-slate-400 dark:text-slate-400"}`} />
+                    <span>Students Directory</span>
+                  </div>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+                    activeTab === "students"
+                      ? "bg-white/20 text-white"
+                      : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                  }`}>
+                    {students.filter(s => s.status !== "inactive").length}
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab("seats"); setMobileMenuOpen(false); }}
+                  className={`w-full min-h-[44px] flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition ${
+                    activeTab === "seats"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/70 dark:hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Grid className={`h-4 w-4 shrink-0 ${activeTab === "seats" ? "text-white" : "text-slate-400 dark:text-slate-400"}`} />
+                    <span>Visual Seat Layout</span>
+                  </div>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+                    activeTab === "seats"
+                      ? "bg-white/20 text-white"
+                      : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                  }`}>
+                    {seats.filter(s => s.status === 'occupied').length}/{seats.length}
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab("memberships"); setMobileMenuOpen(false); }}
+                  className={`w-full min-h-[44px] flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition ${
+                    activeTab === "memberships"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/70 dark:hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Briefcase className={`h-4 w-4 shrink-0 ${activeTab === "memberships" ? "text-white" : "text-slate-400 dark:text-slate-400"}`} />
+                    <span>Plans &amp; Passes</span>
+                  </div>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+                    activeTab === "memberships"
+                      ? "bg-white/20 text-white"
+                      : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                  }`}>
+                    {plans.length}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* SECTION 2: OPERATIONS & DESK */}
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest px-3 block mb-1.5 font-mono">
+                Operations
+              </span>
+              <div className="space-y-1">
+                <button
+                  onClick={() => { setActiveTab("attendance"); setMobileMenuOpen(false); }}
+                  className={`w-full min-h-[44px] flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition ${
+                    activeTab === "attendance"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/70 dark:hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Calendar className={`h-4 w-4 shrink-0 ${activeTab === "attendance" ? "text-white" : "text-slate-400 dark:text-slate-400"}`} />
+                    <span>Attendance Logs</span>
+                  </div>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+                    activeTab === "attendance"
+                      ? "bg-white/20 text-white"
+                      : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
+                  }`}>
+                    {attendances.filter(a => a.date === todayStr && !a.checkOutTime).length} in
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab("payments"); setMobileMenuOpen(false); }}
+                  className={`w-full min-h-[44px] flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition ${
+                    activeTab === "payments"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/70 dark:hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <CreditCard className={`h-4 w-4 shrink-0 ${activeTab === "payments" ? "text-white" : "text-slate-400 dark:text-slate-400"}`} />
+                    <span>Cashier &amp; Expense</span>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab("reports"); setMobileMenuOpen(false); }}
+                  className={`w-full min-h-[44px] flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition ${
+                    activeTab === "reports"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/70 dark:hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <TrendingUp className={`h-4 w-4 shrink-0 ${activeTab === "reports" ? "text-white" : "text-slate-400 dark:text-slate-400"}`} />
+                    <span>Business Reports</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* SECTION 3: AUTOMATION & ALERTS */}
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest px-3 block mb-1.5 font-mono">
+                Alerts &amp; Actions
+              </span>
+              <div className="space-y-1">
+                <button
+                  onClick={() => { setActiveTab("expiring"); setMobileMenuOpen(false); }}
+                  className={`w-full min-h-[44px] flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition ${
+                    activeTab === "expiring"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/70 dark:hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Clock className={`h-4 w-4 shrink-0 ${activeTab === "expiring" ? "text-white" : "text-amber-500"}`} />
+                    <span>Expiring Soon</span>
+                  </div>
+                  {expiringMemberships.length > 0 && (
+                    <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold ${
+                      activeTab === "expiring"
+                        ? "bg-white text-indigo-700"
+                        : "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 ring-1 ring-amber-300 dark:ring-amber-800"
+                    }`}>
+                      {expiringMemberships.length}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab("pending_actions"); setMobileMenuOpen(false); }}
+                  className={`w-full min-h-[44px] flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition ${
+                    activeTab === "pending_actions"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/70 dark:hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <AlertCircle className={`h-4 w-4 shrink-0 ${activeTab === "pending_actions" ? "text-white" : "text-rose-500"}`} />
+                    <span>Pending Actions</span>
+                  </div>
+                  {pendingActions.length > 0 && (
+                    <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold ${
+                      activeTab === "pending_actions"
+                        ? "bg-white text-indigo-700"
+                        : "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 ring-1 ring-rose-300 dark:ring-rose-800 animate-pulse"
+                    }`}>
+                      {pendingActions.length}
+                    </span>
+                  )}
+                </button>
+
+                {currentUser.role !== "RECEPTIONIST" && (
+                  <button
+                    onClick={() => { setActiveTab("whatsapp"); setMobileMenuOpen(false); }}
+                    className={`w-full min-h-[44px] flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition ${
+                      activeTab === "whatsapp"
+                        ? "bg-indigo-600 text-white shadow-xs"
+                        : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/70 dark:hover:text-white"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <MessageSquare className={`h-4 w-4 shrink-0 ${activeTab === "whatsapp" ? "text-white" : "text-emerald-500"}`} />
+                      <span>WhatsApp Triggers</span>
+                    </div>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* SECTION 4: PLATFORM & LOGS */}
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest px-3 block mb-1.5 font-mono">
+                System
+              </span>
+              <div className="space-y-1">
+                <button
+                  onClick={() => { setActiveTab("logs"); setMobileMenuOpen(false); }}
+                  className={`w-full min-h-[44px] flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition ${
+                    activeTab === "logs"
+                      ? "bg-indigo-600 text-white shadow-xs"
+                      : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/70 dark:hover:text-white"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Activity className={`h-4 w-4 shrink-0 ${activeTab === "logs" ? "text-white" : "text-slate-400 dark:text-slate-400"}`} />
+                    <span>Audit Trail Log</span>
+                  </div>
+                </button>
+
+                {currentUser.role !== "RECEPTIONIST" && (
+                  <button
+                    onClick={() => { setActiveTab("settings"); setMobileMenuOpen(false); }}
+                    className={`w-full min-h-[44px] flex items-center justify-between rounded-xl px-3.5 py-2.5 text-xs font-semibold transition ${
+                      activeTab === "settings"
+                        ? "bg-indigo-600 text-white shadow-xs"
+                        : "text-slate-600 hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800/70 dark:hover:text-white"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <SettingsIcon className={`h-4 w-4 shrink-0 ${activeTab === "settings" ? "text-white" : "text-slate-400 dark:text-slate-400"}`} />
+                      <span>Workspace Settings</span>
+                    </div>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Sidebar Organization & Notice Status Footer */}
+          <div className="p-3.5 border-t border-slate-200/80 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40 space-y-2.5">
+            <div className="flex items-center gap-2.5">
+              {organization.logo ? (
+                <img
+                  src={organization.logo}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className="h-8 w-8 rounded-lg object-cover ring-1 ring-slate-200 dark:ring-slate-700 shrink-0"
+                />
+              ) : (
+                <div className="h-8 w-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-xs shrink-0">
+                  {organization.name.substring(0, 1)}
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{organization.name}</p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                    {organization.city || organization.address || "Branch Active"} • {organization.currency || "INR"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {announcements.length > 0 && (
+              <div className="pt-2 border-t border-slate-200/50 dark:border-slate-800/60">
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className="font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wide">Notice</span>
+                  <span className="text-slate-400">{announcements[0].createdAt.split("T")[0]}</span>
+                </div>
+                <p className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-1 mt-0.5 font-medium">{announcements[0].title}</p>
+              </div>
+            )}
           </div>
 
         </nav>
@@ -3108,7 +3330,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <tr key={stud.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/10">
                               <td className="p-4">
                                 <div className="flex items-center gap-3">
-                                  <img src={stud.photo} alt="" className="h-9 w-9 rounded-full object-cover animate-fade-in" referrerPolicy="no-referrer" />
+                                  <div className="h-9 w-9 shrink-0 rounded-full bg-slate-100 dark:bg-slate-800 ring-1 ring-slate-200 dark:ring-slate-700 overflow-hidden flex items-center justify-center text-slate-500 font-bold text-xs">
+                                    {stud.photo ? (
+                                      <img
+                                        src={stud.photo}
+                                        alt={stud.name}
+                                        className="h-full w-full object-cover"
+                                        referrerPolicy="no-referrer"
+                                        onError={(e) => {
+                                          (e.currentTarget as HTMLElement).style.display = 'none';
+                                        }}
+                                      />
+                                    ) : (
+                                      <span>{stud.name.charAt(0).toUpperCase()}</span>
+                                    )}
+                                  </div>
                                   <div>
                                     <h4 className="font-bold text-slate-800 dark:text-slate-100">{stud.name}</h4>
                                     <p className="text-[10px] text-slate-400 font-mono">ID: {stud.studentId} | {stud.phone}</p>
@@ -5507,9 +5743,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition"
+                  disabled={submittingStudent}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
-                  {editingStudentId ? "Save Changes" : "Complete Registration"}
+                  {submittingStudent ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>{editingStudentId ? "Saving..." : "Registering..."}</span>
+                    </>
+                  ) : (
+                    <span>{editingStudentId ? "Save Changes" : "Complete Registration"}</span>
+                  )}
                 </button>
               </div>
             </form>
@@ -5688,9 +5932,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition"
+                  disabled={submittingMembership}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
-                  {editingMembershipId ? "Save Changes" : "Collect Cash & Allocate Seat"}
+                  {submittingMembership ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Processing...</span>
+                    </>
+                  ) : (
+                    <span>{editingMembershipId ? "Save Changes" : "Collect Cash & Allocate Seat"}</span>
+                  )}
                 </button>
               </div>
             </form>
@@ -5769,9 +6021,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition"
+                  disabled={submittingExpense}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
-                  Record Ledger Expense
+                  {submittingExpense ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Recording...</span>
+                    </>
+                  ) : (
+                    <span>Record Ledger Expense</span>
+                  )}
                 </button>
               </div>
             </form>
@@ -5861,9 +6121,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition"
+                  disabled={submittingPlan}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
-                  {editingPlanId ? "Save Changes" : "Publish Plan Pass"}
+                  {submittingPlan ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Publishing...</span>
+                    </>
+                  ) : (
+                    <span>{editingPlanId ? "Save Changes" : "Publish Plan Pass"}</span>
+                  )}
                 </button>
               </div>
             </form>
@@ -5910,9 +6178,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition"
+                  disabled={submittingRoom}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
-                  Create Study Zone
+                  {submittingRoom ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Creating...</span>
+                    </>
+                  ) : (
+                    <span>Create Study Zone</span>
+                  )}
                 </button>
               </div>
             </form>
@@ -6012,9 +6288,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition"
+                  disabled={submittingSingleSeat}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
-                  Create Desk
+                  {submittingSingleSeat ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Creating...</span>
+                    </>
+                  ) : (
+                    <span>Create Desk</span>
+                  )}
                 </button>
               </div>
             </form>
@@ -6144,10 +6428,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-indigo-600 px-5 py-2 font-semibold text-white hover:bg-indigo-700 transition flex items-center gap-1.5"
+                  disabled={submittingBatchSeat}
+                  className="rounded-lg bg-indigo-600 px-5 py-2 font-semibold text-white hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
-                  <Zap className="h-3.5 w-3.5 text-amber-300" />
-                  Generate {batchSeatForm.count} Desks
+                  {submittingBatchSeat ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>Generating Desks...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="h-3.5 w-3.5 text-amber-300" />
+                      <span>Generate {batchSeatForm.count} Desks</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -6213,10 +6507,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={!assignStudentId}
-                  className="rounded-lg bg-indigo-600 px-5 py-2 font-semibold text-white hover:bg-indigo-700 transition disabled:opacity-50"
+                  disabled={!assignStudentId || submittingAssignSeat}
+                  className="rounded-lg bg-indigo-600 px-5 py-2 font-semibold text-white hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
-                  Confirm Allocation
+                  {submittingAssignSeat ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Allocating Desk...</span>
+                    </>
+                  ) : (
+                    <span>Confirm Allocation</span>
+                  )}
                 </button>
               </div>
             </form>
@@ -6313,9 +6614,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition"
+                  disabled={submittingEditSeat}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
-                  Save Changes
+                  {submittingEditSeat ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <span>Save Changes</span>
+                  )}
                 </button>
               </div>
             </form>

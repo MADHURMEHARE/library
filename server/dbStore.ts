@@ -265,7 +265,21 @@ export class DBStore {
     return await this.repos.users.findByOrg(orgId);
   }
   public async addUser(user: User): Promise<User> {
-    return await this.repos.users.insert(user);
+    const cleanEmail = (user.email || "").toLowerCase().trim();
+    if (cleanEmail) {
+      const existing = await this.repos.users.findOne({ email: cleanEmail } as any);
+      if (existing) {
+        const updateData: any = { ...user, id: existing.id, email: cleanEmail };
+        delete updateData._id;
+        await this.repos.users.update(existing.id, updateData);
+        const updated = await this.repos.users.findById(existing.id);
+        return updated || { ...existing, ...updateData };
+      }
+    }
+    return await this.repos.users.insert({
+      ...user,
+      email: cleanEmail
+    });
   }
   public async updateUser(id: string, update: Partial<User>): Promise<User | null> {
     return await this.repos.users.update(id, update);

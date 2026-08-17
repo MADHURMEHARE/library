@@ -10,6 +10,7 @@ export interface Organization {
   name: string;
   logo: string;
   address: string;
+  city?: string;
   phone: string;
   email: string;
   openingTime: string;
@@ -25,6 +26,7 @@ export interface User {
   id: string;
   orgId: string | null;
   email: string;
+  password?: string;
   passwordHash?: string;
   name: string;
   role: UserRole;
@@ -207,6 +209,7 @@ export interface Expense {
   amount: number;
   date: string;
   description: string;
+  createdAt?: string;
 }
 
 export interface SaaSPlan {

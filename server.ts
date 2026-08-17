@@ -145,6 +145,11 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
+    // Verify password if user has password set
+    if (password && user.password && user.password !== password) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
     if (user.status === "inactive") {
       return res.status(403).json({ error: "Your account is inactive. Please contact your administrator." });
     }
@@ -214,6 +219,10 @@ app.post("/api/auth/reset-password", async (req, res) => {
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
+    if (!password) {
+      return res.status(400).json({ error: "Password cannot be empty" });
+    }
+    await dbStore.updateUser(user.id, { password });
     await logAction(user.id, user.name, user.orgId, "RESET_PASSWORD", "User successfully changed password.");
     res.json({ message: "Password updated successfully!" });
   } catch (err: any) {
@@ -264,7 +273,7 @@ app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
 
 app.post("/api/auth/signup", async (req, res) => {
   try {
-    const { name, email, adminName, adminEmail, adminPhone, planId } = req.body;
+    const { name, email, adminName, adminEmail, adminPhone, planId, adminPassword } = req.body;
     if (!name || !email || !adminEmail || !adminName) {
       return res.status(400).json({ error: "All fields are required to register your organization." });
     }
@@ -304,6 +313,7 @@ app.post("/api/auth/signup", async (req, res) => {
       name: adminName,
       role: "ORG_ADMIN",
       phone: adminPhone || "+123456789",
+      password: adminPassword || "password",
       status: "active",
       emailVerified: true,
       createdAt: new Date().toISOString()
@@ -414,19 +424,40 @@ app.get("/api/organizations", authenticateToken, requireSuperAdmin, async (req, 
 
 app.post("/api/organizations", authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
-    const { name, logo, address, phone, email, currency, timezone, planId, adminName, adminEmail } = req.body;
+    const { name, logo, address, phone, email, currency, timezone, planId, adminName, adminEmail, adminPassword } = req.body;
     if (!name || !email) {
       return res.status(400).json({ error: "Organization name and email are required" });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const cleanName = name.trim();
+
+    // Check if an organization with identical name or email already exists
+    const existingOrgs = await dbStore.getOrganizations();
+    const duplicateOrg = existingOrgs.find(o => 
+      o.email.toLowerCase().trim() === cleanEmail || 
+      o.name.toLowerCase().trim() === cleanName.toLowerCase()
+    );
+
+    if (duplicateOrg) {
+      // If created within the last 10 seconds (rapid double click), return the existing organization idempotently
+      const createdTime = new Date(duplicateOrg.createdAt).getTime();
+      if (Date.now() - createdTime < 10000) {
+        return res.json(duplicateOrg);
+      }
+      return res.status(400).json({ 
+        error: `An organization with name "${name}" or email "${email}" already exists.` 
+      });
     }
 
     const orgId = `org-${Date.now()}`;
     const newOrg: Organization = {
       id: orgId,
-      name,
+      name: cleanName,
       logo: logo || "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?q=80&w=200&auto=format&fit=crop",
       address: address || "Default Address",
       phone: phone || "+123456789",
-      email,
+      email: cleanEmail,
       openingTime: "06:00",
       closingTime: "23:00",
       currency: currency || "INR",
@@ -438,20 +469,45 @@ app.post("/api/organizations", authenticateToken, requireSuperAdmin, async (req,
 
     await dbStore.addOrganization(newOrg);
 
-    // Auto-generate an Organization Admin account
-    const adminId = `user-admin-${Date.now()}`;
-    const newAdmin: User = {
-      id: adminId,
-      orgId: orgId,
-      email: adminEmail || `admin@${name.toLowerCase().replace(/\s+/g, "")}.com`,
-      name: adminName || `${name} Owner`,
-      role: "ORG_ADMIN",
-      phone: phone || "+123456789",
-      status: "active",
-      emailVerified: true,
-      createdAt: new Date().toISOString()
-    };
-    await dbStore.addUser(newAdmin);
+    // Auto-generate or associate an Organization Admin account
+    const targetAdminEmail = (adminEmail || `admin@${name.toLowerCase().replace(/\s+/g, "")}.com`).toLowerCase().trim();
+    const existingUser = await dbStore.getUserByEmail(targetAdminEmail);
+    
+    let adminUser: User;
+    if (existingUser) {
+      const updatedRole = existingUser.role === "SUPER_ADMIN" ? "SUPER_ADMIN" : "ORG_ADMIN";
+      const updatedOrgId = existingUser.role === "SUPER_ADMIN" ? (existingUser.orgId || orgId) : orgId;
+      const updateData: Partial<User> = {
+        orgId: updatedOrgId,
+        role: updatedRole,
+        name: adminName || existingUser.name,
+        phone: phone || existingUser.phone || "+123456789",
+        status: "active"
+      };
+      if (adminPassword) {
+        updateData.password = adminPassword;
+      }
+      await dbStore.updateUser(existingUser.id, updateData);
+      adminUser = (await dbStore.getUserById(existingUser.id)) || {
+        ...existingUser,
+        ...updateData
+      };
+    } else {
+      const adminId = `user-admin-${Date.now()}`;
+      adminUser = {
+        id: adminId,
+        orgId: orgId,
+        email: targetAdminEmail,
+        name: adminName || `${name} Owner`,
+        role: "ORG_ADMIN",
+        phone: phone || "+123456789",
+        password: adminPassword || "password",
+        status: "active",
+        emailVerified: true,
+        createdAt: new Date().toISOString()
+      };
+      await dbStore.addUser(adminUser);
+    }
 
     // Auto-generate basic layout structures so the room is ready out of the box!
     const bldId = `bld-${Date.now()}`;
@@ -496,7 +552,7 @@ app.post("/api/organizations", authenticateToken, requireSuperAdmin, async (req,
 
     await logAction("user-super", "Super Admin", null, "CREATE_ORGANIZATION", `Created organization ${name} with ID ${orgId}`);
 
-    res.json({ organization: newOrg, admin: newAdmin });
+    res.json({ organization: newOrg, admin: adminUser });
   } catch (err: any) {
     console.error("Create organization error:", err);
     res.status(500).json({ error: "Failed to create organization: " + err.message });
@@ -524,7 +580,203 @@ app.delete("/api/organizations/:id", authenticateToken, requireSuperAdmin, async
     const org = await dbStore.getOrganizationById(id);
     const orgName = org?.name || "Unknown Organization";
     await dbStore.deleteOrganization(id);
+
+    // Cascade delete all child entities belonging to this tenant
+    const orgFilter: any = { $or: [{ organizationId: id }, { orgId: id }] };
+    await Promise.all([
+      dbStore.repos.users.deleteMany(orgFilter),
+      dbStore.repos.students.deleteMany(orgFilter),
+      dbStore.repos.seats.deleteMany(orgFilter),
+      dbStore.repos.rooms.deleteMany(orgFilter),
+      dbStore.repos.floors.deleteMany(orgFilter),
+      dbStore.repos.buildings.deleteMany(orgFilter),
+      dbStore.repos.memberships.deleteMany(orgFilter),
+      dbStore.repos.membershipPlans.deleteMany(orgFilter),
+      dbStore.repos.payments.deleteMany(orgFilter),
+      dbStore.repos.invoices.deleteMany(orgFilter),
+      dbStore.repos.attendances.deleteMany(orgFilter),
+      dbStore.repos.seatHistory.deleteMany(orgFilter),
+      dbStore.repos.notifications.deleteMany(orgFilter)
+    ]);
+
     await logAction("user-super", "Super Admin", null, "DELETE_ORGANIZATION", `Deleted organization ${orgName} (ID: ${id})`);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// USER & STAFF ACCOUNT MANAGEMENT (ADMIN & SUPER ADMIN)
+// ==========================================
+
+// Get users list (Super Admin sees all users across system; Org Admin sees all users/staff in their organization)
+app.get("/api/users", authenticateToken, async (req: any, res) => {
+  try {
+    const isSuperAdmin = req.user.role === "SUPER_ADMIN";
+    const orgId = isSuperAdmin ? (req.query.orgId as string) : req.user.orgId;
+
+    let users: User[] = [];
+    if (isSuperAdmin && !orgId) {
+      users = await dbStore.getUsers();
+    } else if (orgId) {
+      users = await dbStore.getUsersByOrg(orgId);
+    } else {
+      users = await dbStore.getUsers();
+    }
+
+    // Map users and ensure password field is populated (defaulting to "password" if unset)
+    const userList = users.map(u => ({
+      ...u,
+      password: u.password || "password"
+    }));
+
+    res.json(userList);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Create new user / staff member
+app.post("/api/users", authenticateToken, async (req: any, res) => {
+  try {
+    const isSuperAdmin = req.user.role === "SUPER_ADMIN";
+    const isOrgAdmin = req.user.role === "ORG_ADMIN";
+
+    if (!isSuperAdmin && !isOrgAdmin) {
+      return res.status(403).json({ error: "Access denied. Only administrators can create user accounts." });
+    }
+
+    const { name, email, phone, role, password, orgId, status } = req.body;
+    if (!name || !email) {
+      return res.status(400).json({ error: "Name and Email are required" });
+    }
+
+    const targetOrgId = isSuperAdmin ? (orgId || null) : req.user.orgId;
+    const cleanEmail = email.toLowerCase().trim();
+
+    // Check email uniqueness
+    const existingUsers = await dbStore.getUsers();
+    if (existingUsers.some(u => u.email && u.email.toLowerCase().trim() === cleanEmail)) {
+      return res.status(400).json({ error: "A user with this email address already exists." });
+    }
+
+    const newUser: User = {
+      id: `user-${Date.now()}`,
+      orgId: targetOrgId,
+      email: cleanEmail,
+      name,
+      role: role || (isSuperAdmin ? "ORG_ADMIN" : "RECEPTIONIST"),
+      phone: phone || "+123456789",
+      password: password || "password",
+      status: status || "active",
+      emailVerified: true,
+      createdAt: new Date().toISOString()
+    };
+
+    await dbStore.addUser(newUser);
+    await logAction(req.user.id, req.user.name, targetOrgId, "CREATE_USER", `Created user account ${name} (${cleanEmail}) with role ${newUser.role}`);
+
+    res.json(newUser);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update user details (name, phone, role, status, password)
+app.put("/api/users/:id", authenticateToken, async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    const isSuperAdmin = req.user.role === "SUPER_ADMIN";
+    const isOrgAdmin = req.user.role === "ORG_ADMIN";
+
+    const targetUser = await dbStore.getUserById(id);
+    if (!targetUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (!isSuperAdmin) {
+      if (!isOrgAdmin || targetUser.orgId !== req.user.orgId) {
+        return res.status(403).json({ error: "Access denied. You cannot modify users outside your organization." });
+      }
+    }
+
+    const { name, email, phone, role, status, password } = req.body;
+    const updateData: Partial<User> = {};
+    if (name !== undefined) updateData.name = name;
+    if (email !== undefined) updateData.email = email.toLowerCase().trim();
+    if (phone !== undefined) updateData.phone = phone;
+    if (role !== undefined && (isSuperAdmin || (isOrgAdmin && role !== "SUPER_ADMIN"))) updateData.role = role;
+    if (status !== undefined) updateData.status = status;
+    if (password !== undefined && password.trim() !== "") updateData.password = password;
+
+    await dbStore.updateUser(id, updateData);
+    const updated = await dbStore.getUserById(id);
+    await logAction(req.user.id, req.user.name, targetUser.orgId, "UPDATE_USER", `Updated account details for user ${targetUser.name} (${id})`);
+
+    res.json(updated);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin Reset Password endpoint
+app.put("/api/users/:id/password", authenticateToken, async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    const { password } = req.body;
+    if (!password || password.trim() === "") {
+      return res.status(400).json({ error: "Password cannot be empty" });
+    }
+
+    const isSuperAdmin = req.user.role === "SUPER_ADMIN";
+    const isOrgAdmin = req.user.role === "ORG_ADMIN";
+
+    const targetUser = await dbStore.getUserById(id);
+    if (!targetUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (!isSuperAdmin) {
+      if (!isOrgAdmin || targetUser.orgId !== req.user.orgId) {
+        return res.status(403).json({ error: "Access denied." });
+      }
+    }
+
+    await dbStore.updateUser(id, { password });
+    await logAction(req.user.id, req.user.name, targetUser.orgId, "ADMIN_PASSWORD_RESET", `Admin reset password for user ${targetUser.name} (${targetUser.email})`);
+
+    res.json({ message: "Password updated successfully", user: { id, name: targetUser.name, email: targetUser.email, password } });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete user / staff
+app.delete("/api/users/:id", authenticateToken, async (req: any, res) => {
+  try {
+    const { id } = req.params;
+    if (id === req.user.id) {
+      return res.status(400).json({ error: "You cannot delete your own account." });
+    }
+
+    const isSuperAdmin = req.user.role === "SUPER_ADMIN";
+    const isOrgAdmin = req.user.role === "ORG_ADMIN";
+
+    const targetUser = await dbStore.getUserById(id);
+    if (!targetUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (!isSuperAdmin) {
+      if (!isOrgAdmin || targetUser.orgId !== req.user.orgId) {
+        return res.status(403).json({ error: "Access denied." });
+      }
+    }
+
+    await dbStore.deleteUser(id);
+    await logAction(req.user.id, req.user.name, targetUser.orgId, "DELETE_USER", `Deleted user account ${targetUser.name} (${targetUser.email})`);
+
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -560,12 +812,37 @@ app.post("/api/students", authenticateToken, requireTenant, async (req: any, res
       return res.status(400).json({ error: "Missing required fields (orgId, name, phone)" });
     }
 
+    // Check duplicate student within the same organization
+    const currentStudents = await dbStore.getStudentsByOrg(orgId);
+    const cleanPhone = phone.replace(/[\s-]/g, "").trim();
+    const existingStudentByPhone = currentStudents.find(s => s.phone && s.phone.replace(/[\s-]/g, "").trim() === cleanPhone);
+
+    if (existingStudentByPhone) {
+      // If created within the last 10 seconds (rapid double-click), return existing record idempotently
+      const createdTime = new Date(existingStudentByPhone.createdAt).getTime();
+      if (Date.now() - createdTime < 10000 && existingStudentByPhone.name.toLowerCase().trim() === name.toLowerCase().trim()) {
+        return res.json(existingStudentByPhone);
+      }
+      return res.status(400).json({
+        error: `A student with phone number "${phone}" is already registered (Student ID: ${existingStudentByPhone.studentId} - ${existingStudentByPhone.name}).`
+      });
+    }
+
+    if (email && email.trim() !== "") {
+      const cleanEmail = email.toLowerCase().trim();
+      const existingStudentByEmail = currentStudents.find(s => s.email && s.email.toLowerCase().trim() === cleanEmail);
+      if (existingStudentByEmail) {
+        return res.status(400).json({
+          error: `A student with email address "${email}" is already registered (Student ID: ${existingStudentByEmail.studentId} - ${existingStudentByEmail.name}).`
+        });
+      }
+    }
+
     // SaaS limits enforcement
     const org = await dbStore.getOrganizationById(orgId);
     const planId = org?.planId || "basic";
     const limitObj = SAAS_PLANS.find(p => p.id === planId) || SAAS_PLANS[0];
     
-    const currentStudents = await dbStore.getStudentsByOrg(orgId);
     const currentStudentsCount = currentStudents.length;
     if (currentStudentsCount >= limitObj.maxStudents) {
       return res.status(403).json({
@@ -724,10 +1001,24 @@ app.post("/api/plans", authenticateToken, requireTenant, async (req: any, res) =
       return res.status(400).json({ error: "Missing required plan parameters." });
     }
 
+    const cleanPlanName = name.trim();
+    const existingPlans = await dbStore.getPlansByOrg(orgId);
+    const duplicatePlan = existingPlans.find(p => p.name.toLowerCase().trim() === cleanPlanName.toLowerCase());
+
+    if (duplicatePlan) {
+      const createdTime = new Date(duplicatePlan.createdAt).getTime();
+      if (Date.now() - createdTime < 10000) {
+        return res.json(duplicatePlan);
+      }
+      return res.status(400).json({
+        error: `A membership plan named "${cleanPlanName}" already exists in your organization.`
+      });
+    }
+
     const newPlan: MembershipPlan = {
       id: `plan-${Date.now()}`,
       orgId,
-      name,
+      name: cleanPlanName,
       durationType,
       durationDays: Number(durationDays),
       price: Number(price),
@@ -819,6 +1110,32 @@ app.post("/api/memberships", authenticateToken, requireTenant, async (req: any, 
     const plan = await dbStore.getPlanById(planId);
     if (!student || !plan) {
       return res.status(404).json({ error: "Student or Plan not found." });
+    }
+
+    // Check for rapid duplicate submission (double click protection)
+    const orgMemberships = await dbStore.getMembershipsByOrg(orgId);
+    const recentDuplicate = orgMemberships.find(m => 
+      m.studentId === studentId && 
+      m.planId === planId && 
+      m.startDate === startDate &&
+      Date.now() - new Date(m.createdAt).getTime() < 10000
+    );
+
+    if (recentDuplicate) {
+      const payments = await dbStore.getPaymentsByOrg(orgId);
+      const matchedPayment = payments.find(p => p.membershipId === recentDuplicate.id);
+      return res.json({ membership: recentDuplicate, payment: matchedPayment });
+    }
+
+    // Verify seat availability if seat assignment requested
+    if (assignSeatId) {
+      const seat = await dbStore.getSeatById(assignSeatId);
+      if (!seat) {
+        return res.status(404).json({ error: "Selected seat was not found." });
+      }
+      if (seat.assignedStudentId && seat.assignedStudentId !== studentId) {
+        return res.status(400).json({ error: `Seat ${seat.seatNumber} is already occupied by another student.` });
+      }
     }
 
     // Calculate End Date
@@ -1442,6 +1759,9 @@ app.post("/api/layout/quick-setup", authenticateToken, requireTenant, async (req
 app.post("/api/seats", authenticateToken, requireTenant, async (req: any, res) => {
   try {
     const { orgId, roomId, seatNumber, type, notes, row } = req.body;
+    if (!orgId || !seatNumber) {
+      return res.status(400).json({ error: "orgId and seatNumber are required" });
+    }
     
     // SaaS seat limits enforcement
     const org = await dbStore.getOrganizationById(orgId);
@@ -1479,11 +1799,23 @@ app.post("/api/seats", authenticateToken, requireTenant, async (req: any, res) =
       targetRoomId = rm.id;
     }
 
+    const cleanSeatNumber = seatNumber.trim().toUpperCase();
+    const existingSeat = currentSeats.find(s => s.roomId === targetRoomId && s.seatNumber.toUpperCase() === cleanSeatNumber);
+    if (existingSeat) {
+      const createdTime = new Date(existingSeat.createdAt).getTime();
+      if (Date.now() - createdTime < 10000) {
+        return res.json(existingSeat);
+      }
+      return res.status(400).json({
+        error: `A seat with number "${cleanSeatNumber}" already exists in this study room.`
+      });
+    }
+
     const newSeat: Seat = {
       id: `seat-${Date.now()}`,
       orgId,
       roomId: targetRoomId,
-      seatNumber,
+      seatNumber: cleanSeatNumber,
       type: type || "AC",
       status: "available",
       assignedStudentId: null,
@@ -1492,7 +1824,7 @@ app.post("/api/seats", authenticateToken, requireTenant, async (req: any, res) =
       createdAt: new Date().toISOString()
     };
     await dbStore.addSeat(newSeat);
-    await logAction(req.user.id, req.user.name || "Admin", orgId, "CREATE_SEAT", `Created seat ${seatNumber}`);
+    await logAction(req.user.id, req.user.name || "Admin", orgId, "CREATE_SEAT", `Created seat ${cleanSeatNumber}`);
     res.json(newSeat);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1825,14 +2157,28 @@ app.post("/api/expenses", authenticateToken, requireTenant, async (req: any, res
     const { orgId, title, category, amount, date, description } = req.body;
     if (!orgId || !title || !amount) return res.status(400).json({ error: "Missing required parameters." });
 
+    const targetDate = date || new Date().toISOString().split("T")[0];
+    const existingExpenses = await dbStore.getExpensesByOrg(orgId);
+    const recentDuplicateExp = existingExpenses.find(e => 
+      e.title.toLowerCase().trim() === title.toLowerCase().trim() &&
+      e.amount === Number(amount) &&
+      e.date === targetDate &&
+      Date.now() - new Date(e.createdAt || 0).getTime() < 10000
+    );
+
+    if (recentDuplicateExp) {
+      return res.json(recentDuplicateExp);
+    }
+
     const newExp: Expense = {
       id: `exp-${Date.now()}`,
       orgId,
-      title,
+      title: title.trim(),
       category: category || "General",
       amount: Number(amount),
-      date: date || new Date().toISOString().split("T")[0],
-      description: description || ""
+      date: targetDate,
+      description: description || "",
+      createdAt: new Date().toISOString()
     };
     await dbStore.addExpense(newExp);
     await logAction(req.user.id || "unknown", req.user.name || "Admin", orgId, "RECORD_EXPENSE", `Recorded expense: ${title} (${amount} INR)`);

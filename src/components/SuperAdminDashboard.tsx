@@ -23,7 +23,13 @@ import {
   RefreshCw,
   AlertCircle,
   Sun,
-  Moon
+  Moon,
+  Key,
+  Eye,
+  EyeOff,
+  Copy,
+  UserPlus,
+  Check
 } from "lucide-react";
 import { Organization, User, AuditLog, Announcement, SaaSPlan } from "../types";
 import { apiCall } from "../api";
@@ -61,6 +67,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   setDarkMode
 }) => {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [dbStatus, setDbStatus] = useState<{ connected: string; type: string; details: string }>({
@@ -71,6 +78,13 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Active Main Tab
+  const [mainTab, setMainTab] = useState<"organizations" | "users">("organizations");
+
+  // Passwords visibility mapping
+  const [showPasswordMap, setShowPasswordMap] = useState<Record<string, boolean>>({});
+  const [copiedUserId, setCopiedUserId] = useState<string | null>(null);
+
   // New Organization Modal
   const [isOrgModalOpen, setIsOrgModalOpen] = useState(false);
   const [orgName, setOrgName] = useState("");
@@ -80,7 +94,20 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const [orgPlan, setOrgPlan] = useState("basic");
   const [orgAdminName, setOrgAdminName] = useState("");
   const [orgAdminEmail, setOrgAdminEmail] = useState("");
+  const [orgAdminPassword, setOrgAdminPassword] = useState("password");
   const [submittingOrg, setSubmittingOrg] = useState(false);
+
+  // User Management Modal
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [userForm, setUserForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    role: "ORG_ADMIN" as any,
+    password: "password",
+    orgId: ""
+  });
+  const [submittingUser, setSubmittingUser] = useState(false);
 
   // Announcement Modal
   const [isAnnModalOpen, setIsAnnModalOpen] = useState(false);
@@ -90,6 +117,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
 
   // Search
   const [orgSearch, setOrgSearch] = useState("");
+  const [userSearch, setUserSearch] = useState("");
 
   const fetchData = async () => {
     try {
@@ -101,13 +129,17 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
         .then(data => setDbStatus(data))
         .catch(err => console.error("Failed to fetch DB status:", err));
       
-      const orgsData = await apiCall("/api/organizations");
-      const logsData = await apiCall("/api/audit-logs");
-      const announcementsData = await apiCall("/api/announcements");
+      const [orgsData, usersData, logsData, announcementsData] = await Promise.all([
+        apiCall("/api/organizations"),
+        apiCall("/api/users"),
+        apiCall("/api/audit-logs"),
+        apiCall("/api/announcements")
+      ]);
 
-      setOrganizations(orgsData);
-      setAuditLogs(logsData);
-      setAnnouncements(announcementsData);
+      setOrganizations(orgsData || []);
+      setUsers(usersData || []);
+      setAuditLogs(logsData || []);
+      setAnnouncements(announcementsData || []);
     } catch (err: any) {
       setError(err.message || "Failed to retrieve platform data.");
     } finally {
@@ -118,6 +150,180 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   useEffect(() => {
     fetchData();
   }, []);
+
+  const togglePasswordVisibility = (userId: string) => {
+    setShowPasswordMap(prev => ({
+      ...prev,
+      [userId]: !prev[userId]
+    }));
+  };
+
+  const handleCopyCredentials = (user: User) => {
+    const text = `StudySphere Login Credentials:\nRole: ${user.role}\nEmail: ${user.email}\nPassword: ${user.password || "password"}`;
+    navigator.clipboard.writeText(text);
+    setCopiedUserId(user.id);
+    setTimeout(() => setCopiedUserId(null), 2000);
+    
+    Swal.fire({
+      icon: "success",
+      title: "Credentials Copied!",
+      text: `Login credentials for ${user.name} copied to clipboard.`,
+      timer: 1500,
+      showConfirmButton: false,
+      background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+      color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+    });
+  };
+
+  const handleAdminResetPassword = async (user: User) => {
+    const { value: newPassword } = await Swal.fire({
+      title: `Reset Password for ${user.name}`,
+      text: `Enter a new password for user ${user.email}:`,
+      input: 'text',
+      inputValue: user.password || 'password',
+      inputLabel: 'New Password',
+      inputPlaceholder: 'Enter new password',
+      showCancelButton: true,
+      confirmButtonColor: '#4f46e5',
+      cancelButtonColor: '#64748b',
+      confirmButtonText: 'Update Password',
+      background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+      color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a',
+      inputValidator: (value) => {
+        if (!value || value.trim() === '') {
+          return 'Password cannot be empty!';
+        }
+      }
+    });
+
+    if (newPassword) {
+      try {
+        await apiCall(`/api/users/${user.id}/password`, "PUT", { password: newPassword.trim() });
+        Swal.fire({
+          icon: "success",
+          title: "Password Updated",
+          text: `Password for ${user.name} was successfully changed to: ${newPassword.trim()}`,
+          background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+          color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+        });
+        fetchData();
+      } catch (err: any) {
+        Swal.fire({
+          icon: "error",
+          title: "Reset Failed",
+          text: err.message || "Failed to update password",
+          background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+          color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+        });
+      }
+    }
+  };
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userForm.name || !userForm.email || !userForm.password) {
+      Swal.fire({
+        icon: "warning",
+        title: "Missing Information",
+        text: "Please enter Name, Email, and Password.",
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+      return;
+    }
+
+    try {
+      setSubmittingUser(true);
+      await apiCall("/api/users", "POST", {
+        name: userForm.name,
+        email: userForm.email,
+        phone: userForm.phone || "+91 99999 88888",
+        role: userForm.role,
+        password: userForm.password,
+        orgId: userForm.orgId || null
+      });
+
+      setIsUserModalOpen(false);
+      setUserForm({
+        name: "",
+        email: "",
+        phone: "",
+        role: "ORG_ADMIN",
+        password: "password",
+        orgId: ""
+      });
+
+      Swal.fire({
+        icon: "success",
+        title: "User Account Created",
+        text: `New user account created successfully with password.`,
+        timer: 2000,
+        showConfirmButton: false,
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+
+      fetchData();
+    } catch (err: any) {
+      Swal.fire({
+        icon: "error",
+        title: "Creation Failed",
+        text: err.message || "Failed to create user.",
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+    } finally {
+      setSubmittingUser(false);
+    }
+  };
+
+  const handleDeleteUser = async (user: User) => {
+    if (user.id === currentUser.id) {
+      Swal.fire({
+        icon: "warning",
+        title: "Action Not Allowed",
+        text: "You cannot delete your own active administrator account.",
+        background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+        color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+      });
+      return;
+    }
+
+    Swal.fire({
+      title: `Delete User ${user.name}?`,
+      text: `Are you sure you want to permanently delete the account for ${user.email}?`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#ef4444",
+      cancelButtonColor: "#64748b",
+      confirmButtonText: "Yes, delete account",
+      background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+      color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+    }).then(async (result) => {
+      if (result.isConfirmed) {
+        try {
+          await apiCall(`/api/users/${user.id}`, "DELETE");
+          Swal.fire({
+            icon: "success",
+            title: "User Account Removed",
+            timer: 1500,
+            showConfirmButton: false,
+            background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+            color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+          });
+          fetchData();
+        } catch (err: any) {
+          Swal.fire({
+            icon: "error",
+            title: "Deletion Failed",
+            text: err.message,
+            background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+            color: document.documentElement.classList.contains('dark') ? '#f1f5f9' : '#0f172a'
+          });
+        }
+      }
+    });
+  };
 
   const handleCreateOrg = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,7 +347,8 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
         address: orgAddress,
         planId: orgPlan,
         adminName: orgAdminName,
-        adminEmail: orgAdminEmail
+        adminEmail: orgAdminEmail,
+        adminPassword: orgAdminPassword || "password"
       });
 
       // Reset Form
@@ -152,6 +359,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       setOrgPlan("basic");
       setOrgAdminName("");
       setOrgAdminEmail("");
+      setOrgAdminPassword("password");
       setIsOrgModalOpen(false);
 
       Swal.fire({
@@ -386,6 +594,13 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const filteredOrgs = organizations.filter(org => 
     org.name.toLowerCase().includes(orgSearch.toLowerCase()) ||
     org.email.toLowerCase().includes(orgSearch.toLowerCase())
+  );
+
+  // Filter Users
+  const filteredUsers = users.filter(u =>
+    u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
+    u.email.toLowerCase().includes(userSearch.toLowerCase()) ||
+    u.role.toLowerCase().includes(userSearch.toLowerCase())
   );
 
   // Platform Analytics seed-data
@@ -646,126 +861,325 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
           </div>
         </div>
 
-        {/* Organization Directory Table */}
-        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden dark:bg-slate-900 dark:border-slate-800">
-          <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="font-display font-bold text-base text-slate-900 dark:text-white">
-                Reading Room Organizations Directory
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Manage accounts, subscriptions, and suspend/resume business tenants.
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Search organization..."
-                  value={orgSearch}
-                  onChange={(e) => setOrgSearch(e.target.value)}
-                  className="pl-9 pr-4 py-2 w-full sm:w-60 rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 focus:bg-white dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
-                />
-              </div>
-              <button
-                onClick={() => setIsOrgModalOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-indigo-700 transition shrink-0"
-              >
-                <Plus className="h-4 w-4" />
-                <span>Add Reading Room</span>
-              </button>
-            </div>
-          </div>
+        {/* Section View Switcher Tabs */}
+        <div className="flex items-center gap-2 border-b border-slate-200/90 dark:border-slate-800 pb-3">
+          <button
+            onClick={() => setMainTab("organizations")}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition shadow-2xs ${
+              mainTab === "organizations"
+                ? "bg-indigo-600 text-white shadow-xs ring-1 ring-indigo-500"
+                : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"
+            }`}
+          >
+            <Layers className="h-4 w-4" />
+            <span>Reading Rooms</span>
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+              mainTab === "organizations" ? "bg-white/20 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+            }`}>
+              {organizations.length}
+            </span>
+          </button>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 font-semibold dark:bg-slate-950 dark:border-slate-800">
-                  <th className="p-4">ORGANIZATION</th>
-                  <th className="p-4">CONTACT</th>
-                  <th className="p-4">ADDRESS</th>
-                  <th className="p-4">ACTIVE PLAN</th>
-                  <th className="p-4">STATUS</th>
-                  <th className="p-4 text-right">ACTIONS</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {filteredOrgs.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-400">
-                      <Layers className="h-10 w-10 mx-auto text-slate-300 dark:text-slate-700 mb-3" />
-                      <p>No organizations found matching the filter.</p>
-                    </td>
-                  </tr>
-                ) : (
-                  filteredOrgs.map(org => {
-                    const plan = SAAS_PLANS.find(p => p.id === org.planId);
-                    return (
-                      <tr key={org.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition">
-                        <td className="p-4">
-                          <div className="flex items-center gap-3">
-                            <img
-                              src={org.logo}
-                              alt={org.name}
-                              referrerPolicy="no-referrer"
-                              className="h-9 w-9 rounded-lg object-cover border border-slate-200 dark:border-slate-700"
-                            />
-                            <div>
-                              <h4 className="font-bold text-slate-800 dark:text-slate-100">{org.name}</h4>
-                              <span className="text-[10px] text-slate-400 block font-mono">ID: {org.id} | Joined {org.createdAt.split("T")[0]}</span>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="p-4">
-                          <p className="font-medium text-slate-700 dark:text-slate-300">{org.email}</p>
-                          <p className="text-slate-400 text-[10px]">{org.phone}</p>
-                        </td>
-                        <td className="p-4">
-                          <p className="text-slate-600 dark:text-slate-400 max-w-[180px] truncate">{org.address}</p>
-                        </td>
-                        <td className="p-4">
-                          <div className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2.5 py-1 text-[10px] font-bold text-indigo-700 uppercase dark:bg-indigo-950/40 dark:text-indigo-400">
-                            {plan?.name || org.planId}
-                          </div>
-                          <span className="block text-[10px] text-slate-400 font-medium mt-0.5">₹{(plan?.price || 0).toLocaleString()}/Mo</span>
-                        </td>
-                        <td className="p-4">
-                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase ${
-                            org.status === "active"
-                              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400"
-                              : "bg-amber-50 text-amber-700 dark:bg-amber-950/20 dark:text-amber-400"
-                          }`}>
-                            <span className={`h-1.5 w-1.5 rounded-full ${org.status === 'active' ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
-                            <span>{org.status}</span>
-                          </span>
-                        </td>
-                        <td className="p-4 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              onClick={() => toggleOrgStatus(org.id, org.status)}
-                              title={org.status === "active" ? "Suspend reading room" : "Resume reading room"}
-                              className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-400 dark:hover:bg-slate-800/80 transition"
-                            >
-                              <Ban className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteOrg(org.id)}
-                              title="Permeantly delete"
-                              className="p-1.5 rounded-lg border border-red-100 text-red-500 hover:bg-red-50 dark:border-red-950/20 dark:hover:bg-red-950/50 transition"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+          <button
+            onClick={() => setMainTab("users")}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition shadow-2xs ${
+              mainTab === "users"
+                ? "bg-indigo-600 text-white shadow-xs ring-1 ring-indigo-500"
+                : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"
+            }`}
+          >
+            <Key className="h-4 w-4" />
+            <span>Users &amp; Passwords Management</span>
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+              mainTab === "users" ? "bg-white/20 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+            }`}>
+              {users.length}
+            </span>
+          </button>
         </div>
+
+        {/* Tab 1: Organization Directory Table */}
+        {mainTab === "organizations" && (
+          <div className="rounded-xl border border-slate-200 bg-white overflow-hidden dark:bg-slate-900 dark:border-slate-800">
+            <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="font-display font-bold text-base text-slate-900 dark:text-white">
+                  Reading Room Organizations Directory
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Manage accounts, subscriptions, and suspend/resume business tenants.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search organization..."
+                    value={orgSearch}
+                    onChange={(e) => setOrgSearch(e.target.value)}
+                    className="pl-9 pr-4 py-2 w-full sm:w-60 rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 focus:bg-white dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
+                  />
+                </div>
+                <button
+                  onClick={() => setIsOrgModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-indigo-700 transition shrink-0"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Add Reading Room</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 font-semibold dark:bg-slate-950 dark:border-slate-800">
+                    <th className="p-4">ORGANIZATION</th>
+                    <th className="p-4">CONTACT</th>
+                    <th className="p-4">ADDRESS</th>
+                    <th className="p-4">ACTIVE PLAN</th>
+                    <th className="p-4">STATUS</th>
+                    <th className="p-4 text-right">ACTIONS</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {filteredOrgs.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-slate-400">
+                        <Layers className="h-10 w-10 mx-auto text-slate-300 dark:text-slate-700 mb-3" />
+                        <p>No organizations found matching the filter.</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredOrgs.map(org => {
+                      const plan = SAAS_PLANS.find(p => p.id === org.planId);
+                      return (
+                        <tr key={org.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition">
+                          <td className="p-4">
+                            <div className="flex items-center gap-3">
+                              <img
+                                src={org.logo}
+                                alt={org.name}
+                                referrerPolicy="no-referrer"
+                                className="h-9 w-9 rounded-lg object-cover border border-slate-200 dark:border-slate-700"
+                              />
+                              <div>
+                                <h4 className="font-bold text-slate-800 dark:text-slate-100">{org.name}</h4>
+                                <span className="text-[10px] text-slate-400 block font-mono">ID: {org.id} | Joined {org.createdAt.split("T")[0]}</span>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <p className="font-medium text-slate-700 dark:text-slate-300">{org.email}</p>
+                            <p className="text-slate-400 text-[10px]">{org.phone}</p>
+                          </td>
+                          <td className="p-4">
+                            <p className="text-slate-600 dark:text-slate-400 max-w-[180px] truncate">{org.address}</p>
+                          </td>
+                          <td className="p-4">
+                            <div className="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2.5 py-1 text-[10px] font-bold text-indigo-700 uppercase dark:bg-indigo-950/40 dark:text-indigo-400">
+                              {plan?.name || org.planId}
+                            </div>
+                            <span className="block text-[10px] text-slate-400 font-medium mt-0.5">₹{(plan?.price || 0).toLocaleString()}/Mo</span>
+                          </td>
+                          <td className="p-4">
+                            <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase ${
+                              org.status === "active"
+                                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400"
+                                : "bg-amber-50 text-amber-700 dark:bg-amber-950/20 dark:text-amber-400"
+                            }`}>
+                              <span className={`h-1.5 w-1.5 rounded-full ${org.status === 'active' ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+                              <span>{org.status}</span>
+                            </span>
+                          </td>
+                          <td className="p-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => toggleOrgStatus(org.id, org.status)}
+                                title={org.status === "active" ? "Suspend reading room" : "Resume reading room"}
+                                className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-400 dark:hover:bg-slate-800/80 transition"
+                              >
+                                <Ban className="h-4 w-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteOrg(org.id)}
+                                title="Permanently delete"
+                                className="p-1.5 rounded-lg border border-red-100 text-red-500 hover:bg-red-50 dark:border-red-950/20 dark:hover:bg-red-950/50 transition"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 2: Users & Passwords Management Table */}
+        {mainTab === "users" && (
+          <div className="rounded-xl border border-slate-200 bg-white overflow-hidden dark:bg-slate-900 dark:border-slate-800">
+            <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Key className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                  <h2 className="font-display font-bold text-base text-slate-900 dark:text-white">
+                    Platform User Accounts &amp; Password Management
+                  </h2>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  View, copy, set, and reset passwords for all platform administrators, reading room owners, and staff.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search user or email..."
+                    value={userSearch}
+                    onChange={(e) => setUserSearch(e.target.value)}
+                    className="pl-9 pr-4 py-2 w-full sm:w-60 rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 focus:bg-white dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
+                  />
+                </div>
+                <button
+                  onClick={() => setIsUserModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-indigo-700 transition shrink-0"
+                >
+                  <UserPlus className="h-4 w-4" />
+                  <span>Create User</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 font-semibold dark:bg-slate-950 dark:border-slate-800">
+                    <th className="p-4">USER / NAME</th>
+                    <th className="p-4">ORGANIZATION</th>
+                    <th className="p-4">ROLE</th>
+                    <th className="p-4">EMAIL &amp; PHONE</th>
+                    <th className="p-4">PASSWORD &amp; CREDENTIALS</th>
+                    <th className="p-4 text-right">ACTIONS</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {filteredUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-slate-400">
+                        <Users className="h-10 w-10 mx-auto text-slate-300 dark:text-slate-700 mb-3" />
+                        <p>No users found matching search.</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredUsers.map(user => {
+                      const org = organizations.find(o => o.id === user.orgId);
+                      const isRevealed = showPasswordMap[user.id] || false;
+                      const pwd = user.password || "password";
+
+                      return (
+                        <tr key={user.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition">
+                          <td className="p-4">
+                            <div className="flex items-center gap-2.5">
+                              <div className="h-8 w-8 rounded-full bg-indigo-100 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-bold flex items-center justify-center text-xs shrink-0">
+                                {user.name.substring(0, 1).toUpperCase()}
+                              </div>
+                              <div>
+                                <h4 className="font-bold text-slate-800 dark:text-slate-100">{user.name}</h4>
+                                <span className="text-[10px] text-slate-400 block font-mono">ID: {user.id}</span>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="p-4">
+                            {org ? (
+                              <div>
+                                <span className="font-semibold text-slate-700 dark:text-slate-200">{org.name}</span>
+                                <span className="text-[10px] text-slate-400 block font-mono">ID: {org.id}</span>
+                              </div>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                                PLATFORM WIDE
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="p-4">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              user.role === "SUPER_ADMIN"
+                                ? "bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300"
+                                : user.role === "ORG_ADMIN"
+                                ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300"
+                                : "bg-teal-100 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300"
+                            }`}>
+                              {user.role.replace(/_/g, " ")}
+                            </span>
+                          </td>
+
+                          <td className="p-4">
+                            <p className="font-medium text-slate-800 dark:text-slate-200 font-mono text-[11px]">{user.email}</p>
+                            <p className="text-slate-400 text-[10px]">{user.phone}</p>
+                          </td>
+
+                          {/* PASSWORD FIELD WITH SHOW/HIDE & COPY */}
+                          <td className="p-4">
+                            <div className="inline-flex items-center gap-2 p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+                              <span className="font-mono text-xs font-semibold px-1 text-slate-900 dark:text-slate-100 select-all min-w-[70px]">
+                                {isRevealed ? pwd : "••••••••"}
+                              </span>
+                              <button
+                                onClick={() => togglePasswordVisibility(user.id)}
+                                title={isRevealed ? "Hide password" : "Show password"}
+                                className="p-1 rounded text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 transition"
+                              >
+                                {isRevealed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                              </button>
+                              <button
+                                onClick={() => handleCopyCredentials(user)}
+                                title="Copy email and password"
+                                className="p-1 rounded text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 transition"
+                              >
+                                {copiedUserId === user.id ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                              </button>
+                            </div>
+                          </td>
+
+                          <td className="p-4 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => handleAdminResetPassword(user)}
+                                title="Reset user password"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-900/50 dark:bg-indigo-950/40 dark:text-indigo-300 text-xs font-semibold transition"
+                              >
+                                <Key className="h-3 w-3" />
+                                <span>Reset Password</span>
+                              </button>
+                              {user.id !== currentUser.id && (
+                                <button
+                                  onClick={() => handleDeleteUser(user)}
+                                  title="Delete user"
+                                  className="p-1.5 rounded-lg border border-red-100 text-red-500 hover:bg-red-50 dark:border-red-950/20 dark:hover:bg-red-950/50 transition"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* System Activity Timeline */}
         <div className="rounded-xl border border-slate-200 bg-white p-5 dark:bg-slate-900 dark:border-slate-800">
@@ -898,6 +1312,18 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                       className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 text-slate-800 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 focus:bg-white dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
                     />
                   </div>
+                  <div className="col-span-2">
+                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Default Initial Password *</label>
+                    <input
+                      type="text"
+                      required
+                      value={orgAdminPassword}
+                      onChange={(e) => setOrgAdminPassword(e.target.value)}
+                      placeholder="password"
+                      className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 text-slate-800 font-mono focus:outline-hidden focus:ring-1 focus:ring-indigo-500 focus:bg-white dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
+                    />
+                    <span className="text-[10px] text-slate-400 mt-1 block">The administrator will use this password to log in. You can view or reset it anytime.</span>
+                  </div>
                 </div>
               </div>
 
@@ -915,6 +1341,122 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                   className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 transition flex items-center gap-1"
                 >
                   {submittingOrg ? "Registering..." : "Activate SaaS Tenant"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Create User Modal */}
+      {isUserModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-lg overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between border-b border-slate-100 p-4 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <UserPlus className="h-5 w-5 text-indigo-600" />
+                <h3 className="font-display text-base font-bold text-slate-800 dark:text-slate-100">
+                  Create New Platform / Tenant User
+                </h3>
+              </div>
+              <button onClick={() => setIsUserModalOpen(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleCreateUser} className="overflow-y-auto p-6 space-y-4 flex-1">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Full Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={userForm.name}
+                  onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
+                  placeholder="e.g. Ramesh Kumar"
+                  className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 text-slate-800 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 focus:bg-white dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Email Address *</label>
+                  <input
+                    type="email"
+                    required
+                    value={userForm.email}
+                    onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
+                    placeholder="user@example.com"
+                    className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 text-slate-800 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 focus:bg-white dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Phone Number</label>
+                  <input
+                    type="text"
+                    value={userForm.phone}
+                    onChange={(e) => setUserForm({ ...userForm, phone: e.target.value })}
+                    placeholder="+91 99999 88888"
+                    className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 text-slate-800 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 focus:bg-white dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Assigned Role</label>
+                  <select
+                    value={userForm.role}
+                    onChange={(e) => setUserForm({ ...userForm, role: e.target.value as any })}
+                    className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 text-slate-800 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 focus:bg-white dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
+                  >
+                    <option value="ORG_ADMIN">Reading Room Admin (ORG_ADMIN)</option>
+                    <option value="ORG_STAFF">Reading Room Staff (ORG_STAFF)</option>
+                    <option value="SUPER_ADMIN">Platform Super Admin (SUPER_ADMIN)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Assigned Organization</label>
+                  <select
+                    value={userForm.orgId}
+                    onChange={(e) => setUserForm({ ...userForm, orgId: e.target.value })}
+                    disabled={userForm.role === "SUPER_ADMIN"}
+                    className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 text-slate-800 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 focus:bg-white dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 disabled:opacity-50"
+                  >
+                    <option value="">-- Select Reading Room --</option>
+                    {organizations.map(org => (
+                      <option key={org.id} value={org.id}>{org.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Account Password *</label>
+                <input
+                  type="text"
+                  required
+                  value={userForm.password}
+                  onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
+                  placeholder="password"
+                  className="w-full rounded-lg border border-slate-200 px-3.5 py-2 text-xs bg-slate-50 font-mono text-slate-800 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 focus:bg-white dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">You can view, copy or reset this password anytime from this dashboard.</span>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsUserModalOpen(false)}
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingUser}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 transition"
+                >
+                  {submittingUser ? "Creating..." : "Save & Create User"}
                 </button>
               </div>
             </form>

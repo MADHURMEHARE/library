@@ -53,6 +53,7 @@ export async function clearAllDemoData(): Promise<{ success: boolean; counts: Re
     organizationId: null,
     orgId: null,
     email: "superadmin@platform.com",
+    password: "password",
     name: "Platform Administrator",
     role: "SUPER_ADMIN",
     phone: "+91 99999 99999",

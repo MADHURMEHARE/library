@@ -129,13 +129,13 @@ export const IDCardGenerator: React.FC<IDCardGeneratorProps> = ({
             {/* Bottom QR/Footer Area */}
             <div className="z-10 mt-4 pt-4 border-t border-white/10 flex items-center justify-between gap-4">
               <div className="text-[9px] text-slate-400">
-                <span className="block font-semibold text-white">Athena Study Lounge</span>
-                <p className="mt-0.5 line-clamp-2">Always present your card at the desk QR reader.</p>
+                <span className="block font-semibold text-white truncate max-w-[180px]">{organization?.name || "Reading Room"}</span>
+                <p className="mt-0.5 text-[8px] text-slate-400">Scan at entrance terminal for automated check-in.</p>
               </div>
               
               {/* Simulated QR Code Component */}
-              <div className="bg-white p-1 rounded-lg shadow-md shrink-0 flex items-center justify-center">
-                <QrCode className="h-10 w-10 text-slate-950" />
+              <div className="bg-white p-1.5 rounded-lg shadow-md shrink-0 flex items-center justify-center">
+                <QrCode className="h-9 w-9 text-slate-950" />
               </div>
             </div>
 
