@@ -1092,6 +1092,40 @@ app.get("/api/memberships", authenticateToken, requireTenant, async (req: any, r
   }
 });
 
+app.post("/api/email/test", async (req, res) => {
+  try {
+    const { to } = req.body;
+
+    if (!to) {
+      return res.status(400).json({
+        error: "Recipient email is required",
+      });
+    }
+
+    const info = await sendRenewalEmail({
+      to,
+      studentName: "Test Student",
+      organizationName: "StudySphere Test Reading Room",
+      planName: "Premium Plan",
+      expiryDate: "2026-08-20",
+      daysRemaining: 3,
+    });
+
+    res.json({
+      success: true,
+      message: "Test email sent successfully",
+      messageId: info.messageId,
+    });
+  } catch (error: any) {
+    console.error("[Email Test] Failed:", error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 // Create / Purchase / Renew Membership
 app.post("/api/memberships", authenticateToken, requireTenant, async (req: any, res) => {
   try {
