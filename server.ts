@@ -11,6 +11,7 @@ import { runSeed } from "./server/db/seed";
 import { runMigration } from "./server/db/migrate";
 import { clearAllDemoData } from "./server/db/clean";
 import jwt from "jsonwebtoken";
+import { sendRenewalEmail } from "./emailService";
 import {
   Organization,
   User,
@@ -2732,21 +2733,282 @@ app.get("/api/db-status", authenticateToken, async (req, res) => {
 });
 
 // ==========================================
-// VITE MIDDLEWARE / SPA FALLBACK
+// AUTOMATIC MEMBERSHIP RENEWAL SCHEDULER
 // ==========================================
 
+const RENEWAL_REMINDER_DAYS = 3;
+
+async function processAutomaticRenewalReminders() {
+  console.log(
+    `[Renewal Scheduler] Checking memberships at ${new Date().toISOString()}`
+  );
+
+  try {
+    const organizations = await dbStore.getOrganizations();
+
+    let notificationsCreated = 0;
+
+    for (const org of organizations) {
+      if (org.status !== "active") {
+        continue;
+      }
+
+      const [memberships, students, plans] = await Promise.all([
+        dbStore.getMembershipsByOrg(org.id),
+        dbStore.getStudentsByOrg(org.id),
+        dbStore.getPlansByOrg(org.id),
+      ]);
+
+      const existingNotifications =
+        await dbStore.getNotificationsByOrg(org.id);
+
+      const today = new Date();
+
+      // Normalize today to YYYY-MM-DD
+      const todayStr = today.toISOString().split("T")[0];
+
+      for (const membership of memberships) {
+        // Only active memberships should receive renewal reminders
+        if (membership.status !== "active") {
+          continue;
+        }
+
+        const student = students.find(
+          (s) => s.id === membership.studentId
+        );
+
+        if (!student) {
+          console.warn(
+            `[Renewal Scheduler] Student not found for membership ${membership.id}`
+          );
+          continue;
+        }
+
+        const plan = plans.find(
+          (p) => p.id === membership.planId
+        );
+
+        if (!plan) {
+          console.warn(
+            `[Renewal Scheduler] Plan not found for membership ${membership.id}`
+          );
+          continue;
+        }
+
+        // Calculate remaining days
+        const endDate = new Date(membership.endDate);
+
+        const timeDifference =
+          endDate.getTime() - today.getTime();
+
+        const daysRemaining = Math.ceil(
+          timeDifference / (1000 * 60 * 60 * 24)
+        );
+
+        // Only remind between 1 and 3 days before expiry
+        if (
+          daysRemaining < 1 ||
+          daysRemaining > RENEWAL_REMINDER_DAYS
+        ) {
+          continue;
+        }
+
+        // Prevent duplicate notification on the same day
+        const alreadyNotifiedToday = existingNotifications.some(
+          (notification) => {
+            if (
+              notification.studentId !== student.id ||
+              notification.type !== "expiry"
+            ) {
+              return false;
+            }
+
+            const notificationDate =
+              notification.createdAt.split("T")[0];
+
+            return notificationDate === todayStr;
+          }
+        );
+
+        if (alreadyNotifiedToday) {
+          console.log(
+            `[Renewal Scheduler] Already notified ${student.name} today.`
+          );
+          continue;
+        }
+
+        const message =
+          daysRemaining === 1
+            ? `Hi ${student.name}, your ${plan.name} membership at ${org.name} expires tomorrow (${membership.endDate}). Please renew your membership to continue using the reading room.`
+            : `Hi ${student.name}, your ${plan.name} membership at ${org.name} expires in ${daysRemaining} days (${membership.endDate}). Please renew your membership to continue using the reading room.`;
+
+        const notification = {
+          id: `not-renewal-${Date.now()}-${Math.random()
+            .toString(36)
+            .substring(2, 8)}`,
+
+          orgId: org.id,
+
+          title: "Membership Renewal Reminder",
+
+          message,
+
+          type: "expiry" as const,
+
+          status: "unread" as const,
+
+          studentId: student.id,
+
+          createdAt: new Date().toISOString(),
+        };
+
+        await dbStore.addNotification(notification);
+
+        // ==========================================
+// SEND RENEWAL EMAIL
+// ==========================================
+
+if (student.email) {
+  try {
+    await sendRenewalEmail({
+      to: student.email,
+      studentName: student.name,
+      organizationName: org.name,
+      planName: plan.name,
+      expiryDate: membership.endDate,
+      daysRemaining,
+    });
+
+    console.log(
+      `[Renewal Scheduler] Email sent to ${student.email}`
+    );
+  } catch (emailError) {
+    console.error(
+      `[Renewal Scheduler] Failed to send email to ${student.email}:`,
+      emailError
+    );
+  }
+}
+
+        // Add audit log
+        await dbStore.addAuditLog({
+          id: `aud-renewal-${Date.now()}-${Math.random()
+            .toString(36)
+            .substring(2, 8)}`,
+
+          orgId: org.id,
+
+          userId: "system-scheduler",
+
+          userName: "Automatic Renewal Scheduler",
+
+          action: "RENEWAL_REMINDER_SENT",
+
+          details: `Renewal reminder created for ${student.name}. Membership expires in ${daysRemaining} day(s) on ${membership.endDate}.`,
+
+          timestamp: new Date().toISOString(),
+        });
+
+        notificationsCreated++;
+
+        console.log(
+          `[Renewal Scheduler] Reminder created for ${student.name} - ${daysRemaining} day(s) remaining.`
+        );
+      }
+    }
+
+    console.log(
+      `[Renewal Scheduler] Completed. ${notificationsCreated} notification(s) created.`
+    );
+  } catch (error) {
+    console.error(
+      "[Renewal Scheduler] Failed:",
+      error
+    );
+  }
+}
+
+// ==========================================
+// SCHEDULE DAILY RENEWAL CHECK
+// ==========================================
+
+function startRenewalScheduler() {
+  const now = new Date();
+
+  // Target 9:00 AM India Standard Time
+  const nextRun = new Date(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(now)
+  );
+
+  // Instead of relying on server timezone,
+  // calculate the next 9 AM in India manually.
+  const indiaFormatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  const indiaDate = indiaFormatter.format(now);
+
+  let target = new Date(`${indiaDate}T09:00:00+05:30`);
+
+  // If today's 9 AM has already passed,
+  // schedule tomorrow's 9 AM.
+  if (target.getTime() <= now.getTime()) {
+    target = new Date(
+      target.getTime() + 24 * 60 * 60 * 1000
+    );
+  }
+
+  const delay = target.getTime() - now.getTime();
+
+  console.log(
+    `[Renewal Scheduler] Next automatic check: ${target.toISOString()}`
+  );
+
+  setTimeout(() => {
+    // Run the job
+    processAutomaticRenewalReminders();
+
+    // Then run every 24 hours
+    setInterval(
+      processAutomaticRenewalReminders,
+      24 * 60 * 60 * 1000
+    );
+  }, delay);
+}
+
+// ==========================================
+// VITE MIDDLEWARE / SPA FALLBACK
+// ==========================================
 async function startServer() {
   await dbStore.initialize();
+
+  // Start automatic renewal scheduler
+  startRenewalScheduler();
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
+
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
+
     app.use(express.static(distPath));
+
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
